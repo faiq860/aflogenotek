@@ -17,7 +17,6 @@ function App() {
   const [qrSrc, setQrSrc] = useState('')
   const [hardwareIdParam, setHardwareIdParam] = useState('')
   const [registerModalOpen, setRegisterModalOpen] = useState(false)
-  const [newCustomerName, setNewCustomerName] = useState('')
 
   // البيانات التجريبية كاحتياط
   const mockData = [
