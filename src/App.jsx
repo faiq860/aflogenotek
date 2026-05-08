@@ -206,7 +206,7 @@ function App() {
   }
 
   const handleCopyLink = (hardwareId) => {
-    const link = `\${window.location.origin}/portal?id=\${hardwareId}`;
+    const link = `${window.location.origin}/portal?id=${hardwareId}`;
     navigator.clipboard.writeText(link);
     alert('تم نسخ الرابط بنجاح!');
   }
