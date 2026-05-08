@@ -296,7 +296,7 @@ function App() {
               <div style={{ fontWeight: '600' }}>المهندس (AFLO)</div>
               <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>مسؤول النظام</div>
             </div>
-            <button onClick={() => setRegisterModalOpen(true)} style={{ background: 'var(--primary)', border: 'none', color: '#0b0f19', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>تسجيل جهاز</button>
+            <button onClick={() => { setRegisterModalOpen(true); if (!hardwareIdParam) setHardwareIdParam("GENO-" + Math.random().toString(36).substring(2, 10).toUpperCase()); }} style={{ background: 'var(--primary)', border: 'none', color: '#0b0f19', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>تسجيل جهاز</button>
             <button className="logout-btn" onClick={handleLogout} style={{ background: 'transparent', border: '1px solid var(--card-border)', color: 'var(--text-muted)', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}>تسجيل الخروج</button>
           </div>
         </header>
