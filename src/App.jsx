@@ -8,6 +8,9 @@ function App() {
   const [error, setError] = useState('')
   const [devices, setDevices] = useState([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [currentDevice, setCurrentDevice] = useState(null)
+  const [newCustomerName, setNewCustomerName] = useState('')
   const [modalTitle, setModalTitle] = useState('')
   const [modalDesc, setModalDesc] = useState('')
   const [manualCode, setManualCode] = useState('------')
@@ -203,6 +206,54 @@ function App() {
     printWindow.document.close();
   }
 
+  const handleCopyLink = (hardwareId) => {
+    const link = `\${window.location.origin}/portal?id=\${hardwareId}`;
+    navigator.clipboard.writeText(link);
+    alert('تم نسخ الرابط بنجاح!');
+  }
+
+  const handleEdit = (device) => {
+    setCurrentDevice(device)
+    setNewCustomerName(device.customer)
+    setEditModalOpen(true)
+  }
+
+  const handleSaveEdit = async () => {
+    try {
+      const res = await fetch('/api/update_device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hardwareId: currentDevice.id, customerName: newCustomerName })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setEditModalOpen(false)
+        fetchDevices()
+        alert('تم تعديل البيانات بنجاح!')
+      }
+    } catch (err) {
+      alert('حدث خطأ أثناء التعديل')
+    }
+  }
+
+  const handleDelete = async (hardwareId) => {
+    if (!window.confirm('هل أنت متأكد من حذف هذا العميل نهائياً؟')) return;
+    try {
+      const res = await fetch('/api/delete_device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hardwareId })
+      })
+      const data = await res.json()
+      if (data.success) {
+        fetchDevices()
+        alert('تم حذف العميل بنجاح!')
+      }
+    } catch (err) {
+      alert('حدث خطأ أثناء الحذف')
+    }
+  }
+
   if (!isLoggedIn) {
     return (
       <>
@@ -302,8 +353,11 @@ function App() {
                     <td style={{ padding: '16px', color: isOfflineRed ? 'var(--danger)' : 'var(--text-muted)' }}>{item.lastSeen}</td>
                     <td style={{ padding: '16px' }}>
                       <div style={{ display: 'flex', gap: '10px' }}>
-                        <button className="action-btn btn-unlock" onClick={() => generateQR('unlock', item.id, item.customer)} style={{ padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 255, 255, 0.1)', color: 'var(--primary)', border: '1px solid rgba(0, 255, 255, 0.2)' }}>🔓 توليد QR فك الحجب</button>
-                        <button className="action-btn btn-test" onClick={() => generateQR('test', item.id, item.customer)} style={{ padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 215, 0, 0.1)', color: 'var(--accent)', border: '1px solid rgba(255, 215, 0, 0.2)' }}>🧪 توليد QR إضافة فحص</button>
+                        <button className="action-btn btn-unlock" onClick={() => generateQR('unlock', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 255, 255, 0.1)', color: 'var(--primary)', border: '1px solid rgba(0, 255, 255, 0.2)' }}>🔓 فك الحجب</button>
+                        <button className="action-btn btn-test" onClick={() => generateQR('test', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 215, 0, 0.1)', color: 'var(--accent)', border: '1px solid rgba(255, 215, 0, 0.2)' }}>🧪 إضافة فحص</button>
+                        <button className="action-btn btn-copy" onClick={() => handleCopyLink(item.id)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 255, 255, 0.1)', color: 'var(--text)', border: '1px solid rgba(255, 255, 255, 0.2)' }}>🔗 نسخ الرابط</button>
+                        <button className="action-btn btn-edit" onClick={() => handleEdit(item)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 150, 255, 0.1)', color: '#00c3ff', border: '1px solid rgba(0, 150, 255, 0.2)' }}>✏️ تعديل</button>
+                        <button className="action-btn btn-delete" onClick={() => handleDelete(item.id)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 0, 0, 0.1)', color: 'var(--danger)', border: '1px solid rgba(255, 0, 0, 0.2)' }}>🗑️ حذف</button>
                       </div>
                     </td>
                   </tr>
@@ -331,6 +385,28 @@ function App() {
           <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'center' }}>
             <button className="print-btn" onClick={handlePrint} style={{ background: 'var(--primary)', border: 'none', color: '#0b0f19', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>🖨️ طباعة</button>
             <button className="close-modal" onClick={() => setModalOpen(false)} style={{ background: 'transparent', border: '1px solid var(--card-border)', color: 'var(--text-muted)', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer' }}>إغلاق النافذة</button>
+          </div>
+        </div>
+      </div>
+
+      {/* النافذة المنبثقة للتعديل */}
+      <div className={`modal-overlay \${editModalOpen ? 'active' : ''}`} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, opacity: editModalOpen ? 1 : 0, visibility: editModalOpen ? 'visible' : 'hidden', transition: 'all 0.3s ease' }}>
+        <div className="modal-content glass" style={{ width: '90%', maxWidth: '400px', padding: '30px', textAlign: 'center', transform: editModalOpen ? 'scale(1)' : 'scale(0.8)', transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+          <div className="modal-title" style={{ fontSize: '20px', fontWeight: '700', marginBottom: '20px', color: 'var(--primary)' }}>تعديل بيانات العميل</div>
+          
+          <div style={{ marginBottom: '20px', textAlign: 'right' }}>
+            <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontSize: '14px' }}>اسم العميل الجديد:</label>
+            <input 
+              type="text" 
+              value={newCustomerName} 
+              onChange={(e) => setNewCustomerName(e.target.value)} 
+              style={{ width: '100%', padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--card-border)', color: 'white', fontSize: '14px' }}
+            />
+          </div>
+          
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+            <button onClick={handleSaveEdit} style={{ background: 'var(--primary)', border: 'none', color: '#0b0f19', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>حفظ التعديلات</button>
+            <button onClick={() => setEditModalOpen(false)} style={{ background: 'transparent', border: '1px solid var(--card-border)', color: 'var(--text-muted)', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer' }}>إلغاء</button>
           </div>
         </div>
       </div>
