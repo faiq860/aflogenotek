@@ -3,8 +3,8 @@ import './App.css'
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [username, setUsername] = useState('aflo')
-  const [password, setPassword] = useState('aflo_serviceGENOTEK0304')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [devices, setDevices] = useState([])
   const [modalOpen, setModalOpen] = useState(false)
@@ -59,14 +59,24 @@ function App() {
     }
   }
 
-  const handleLogin = () => {
-    if (username === "aflo" && password === "aflo_serviceGENOTEK0304") {
-      localStorage.setItem("isLoggedIn", "true")
-      setIsLoggedIn(true)
-      setError('')
-      fetchDevices()
-    } else {
-      setError('بيانات الدخول غير صحيحة!')
+  const handleLogin = async () => {
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })
+      const data = await res.json()
+      if (data.success) {
+        localStorage.setItem("isLoggedIn", "true")
+        setIsLoggedIn(true)
+        setError('')
+        fetchDevices()
+      } else {
+        setError(data.error || 'بيانات الدخول غير صحيحة!')
+      }
+    } catch (err) {
+      setError('حدث خطأ أثناء الاتصال بالسيرفر')
     }
   }
 

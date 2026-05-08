@@ -2,7 +2,10 @@ import pg from 'pg';
 const { Client } = pg;
 
 export default async function handler(req, res) {
-  const connectionString = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_2TmpBqQa7tsD@ep-broad-unit-aojai9s6-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require";
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    return res.status(500).json({ error: "DATABASE_URL is not set" });
+  }
   
   const client = new Client({
     connectionString: connectionString,
