@@ -149,7 +149,13 @@ function App() {
     if (type === 'unlock') {
       title = `🔑 فك حجب جهاز: ${deviceId}`
       desc = `هذا الرمز مخصص لفتح حجب النظام في ${customerName} لمدة 30 دقيقة.`
-      dataToEncode = `UNLOCK|${deviceId}|${randomCode}|${new Date().toISOString()}`
+      dataToEncode = JSON.stringify({
+        testId: "UNLOCK",
+        testName: "Unlock System",
+        quantity: 1,
+        deviceId: deviceId,
+        expiry: new Date(new Date().getTime() + 30 * 60000).toISOString()
+      })
     } else {
       title = `🧪 إضافة فحص لجهاز: ${deviceId}`
       desc = `هذا الرمز مخصص لشحن رصيد فحوصات في ${customerName}.`
