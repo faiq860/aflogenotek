@@ -29,13 +29,7 @@ export default async function handler(req, res) {
       lastSeen: row.last_seen ? new Date(row.last_seen).toLocaleString('ar-EG') : "الآن"
     }));
 
-    // إذا لم تكن هناك بيانات، نرجع بيانات تجريبية لكي لا تبدو الصفحة فارغة
-    if (devices.length === 0) {
-      devices.push(
-        { customer: "مختبر الحياة التخصصي", device: "BioAnalyzer-3000", status: "online", lastSeen: "الآن", id: "DEV-8891" },
-        { customer: "مستشفى الأمل", device: "Genotek-X1", status: "online", lastSeen: "منذ 5 دقائق", id: "DEV-1102" }
-      );
-    }
+    // لا نرجع بيانات تجريبية إذا كانت القاعدة فارغة
 
     res.status(200).json(devices);
   } catch (error) {

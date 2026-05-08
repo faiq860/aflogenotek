@@ -3,6 +3,18 @@ import react from '@vitejs/plugin-react'
 import fs from 'fs'
 import path from 'path'
 
+// تحميل ملف .env يدوياً للعمليات المحلية
+const envPath = path.join(process.cwd(), '.env');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf-8');
+  envContent.split('\n').forEach(line => {
+    const [key, ...value] = line.split('=');
+    if (key && value.length > 0) {
+      process.env[key.trim()] = value.join('=').trim();
+    }
+  });
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [

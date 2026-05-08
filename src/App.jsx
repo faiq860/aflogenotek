@@ -304,19 +304,19 @@ function App() {
         {/* كروت الإحصائيات */}
         <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
           <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
-            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--primary)' }}>3</div>
+            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--primary)' }}>{devices.length}</div>
             <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>إجمالي العملاء</div>
           </div>
           <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
-            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--primary)' }}>5</div>
+            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--primary)' }}>{devices.length}</div>
             <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>الأجهزة الإجمالية</div>
           </div>
           <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
-            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--success)' }}>4</div>
+            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--success)' }}>{devices.filter(d => d.status === 'online').length}</div>
             <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>متصل الآن</div>
           </div>
           <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
-            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--danger)' }}>1</div>
+            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--danger)' }}>{devices.filter(d => d.status === 'offline').length}</div>
             <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>منقطع (أكثر من 72 ساعة)</div>
           </div>
         </div>
