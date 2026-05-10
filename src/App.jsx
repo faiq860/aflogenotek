@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import './App.css'
+import QuotaManager from './QuotaManager'
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
@@ -17,6 +18,7 @@ function App() {
   const [qrSrc, setQrSrc] = useState('')
   const [hardwareIdParam, setHardwareIdParam] = useState('')
   const [registerModalOpen, setRegisterModalOpen] = useState(false)
+  const [quotaDevice, setQuotaDevice] = useState(null)
 
   // البيانات التجريبية كاحتياط
   const mockData = [
@@ -308,7 +310,7 @@ function App() {
         </header>
 
         {/* كروت الإحصائيات */}
-        <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+        <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '20px' }}>
           <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
             <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--primary)' }}>{devices.length}</div>
             <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>إجمالي العملاء</div>
@@ -324,6 +326,11 @@ function App() {
           <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
             <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--danger)' }}>{devices.filter(d => d.status === 'offline').length}</div>
             <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>منقطع (أكثر من 72 ساعة)</div>
+          </div>
+          <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center', cursor: 'pointer', border: '1px solid rgba(245,158,11,0.25)' }} onClick={() => alert('انقر على زر 📊 الفحوصات لأي جهاز لإدارة رصيده')}>
+            <div style={{ fontSize: '28px', marginBottom: '4px' }}>🧪</div>
+            <div className="stat-label" style={{ color: '#f59e0b', fontSize: '13px', fontWeight: '700' }}>إدارة حصص الفحوصات</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>اضغط 📊 على أي جهاز</div>
           </div>
         </div>
 
@@ -359,7 +366,8 @@ function App() {
                     <td style={{ padding: '16px' }}>
                       <div style={{ display: 'flex', gap: '10px' }}>
                         <button className="action-btn btn-unlock" onClick={() => generateQR('unlock', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 255, 255, 0.1)', color: 'var(--primary)', border: '1px solid rgba(0, 255, 255, 0.2)' }}>🔓 فك الحجب</button>
-                        <button className="action-btn btn-test" onClick={() => generateQR('test', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 215, 0, 0.1)', color: 'var(--accent)', border: '1px solid rgba(255, 215, 0, 0.2)' }}>🧪 إضافة فحص</button>
+                        <button className="action-btn btn-test" onClick={() => generateQR('test', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 215, 0, 0.1)', color: 'var(--accent)', border: '1px solid rgba(255, 215, 0, 0.2)' }}>🧪 شحن QR</button>
+                        <button className="action-btn btn-quota" onClick={() => setQuotaDevice(item)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' }}>📊 الفحوصات</button>
                         <button className="action-btn btn-copy" onClick={() => handleCopyLink(item.id)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 255, 255, 0.1)', color: 'var(--text)', border: '1px solid rgba(255, 255, 255, 0.2)' }}>🔗 نسخ الرابط</button>
                         <button className="action-btn btn-edit" onClick={() => handleEdit(item)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 150, 255, 0.1)', color: '#00c3ff', border: '1px solid rgba(0, 150, 255, 0.2)' }}>✏️ تعديل</button>
                         <button className="action-btn btn-delete" onClick={() => handleDelete(item.id)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 0, 0, 0.1)', color: 'var(--danger)', border: '1px solid rgba(255, 0, 0, 0.2)' }}>🗑️ حذف</button>
@@ -417,6 +425,7 @@ function App() {
       </div>
 
       {renderRegisterModal()}
+      {quotaDevice && <QuotaManager device={quotaDevice} onClose={() => setQuotaDevice(null)} />}
     </div>
   )
 }
