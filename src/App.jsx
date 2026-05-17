@@ -261,6 +261,26 @@ function App() {
     }
   }
 
+  const handleResetHardwareLock = async (hardwareId, customerName) => {
+    if (!window.confirm(`هل أنت متأكد من إعادة تعيين قفل الععتاد لـ ${customerName}؟\nسيؤدي هذا إلى فك الارتباط وبصمة الـ PC الحالي تلقائياً والسماح بربط الحاسوب/الجهاز الجديد عند أول اتصال.`)) return;
+    try {
+      const res = await fetch('/api/update_device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hardwareId, resetHardwareLock: true })
+      })
+      const data = await res.json()
+      if (data.success) {
+        alert('تم فك قفل العتاد بنجاح! جاهز للاعتمد التلقائي الجديد.')
+        fetchDevices()
+      } else {
+        alert('فشل إعادة تعيين القفل: ' + data.error)
+      }
+    } catch (err) {
+      alert('حدث خطأ أثناء الاتصال بالسيرفر')
+    }
+  }
+
   if (!isLoggedIn) {
     return (
       <>
@@ -348,26 +368,57 @@ function App() {
             </thead>
             <tbody>
               {devices.map((item, index) => {
-                const isOfflineRed = item.lastSeen.includes("أيام") || item.status === "offline"
-                const statusClass = isOfflineRed ? "status-offline" : (item.status === "online" ? "status-online" : "status-offline")
-                const statusText = isOfflineRed ? "منقطع" : (item.status === "online" ? "متصل" : "منقطع")
+                const isBlocked = item.status === "blocked"
+                const isOfflineRed = item.lastSeen.includes("أيام") || item.status === "offline" || isBlocked
+                
+                let statusText = "منقطع"
+                if (isBlocked) {
+                  statusText = "محظور (تلاعب)"
+                } else if (item.status === "online" || item.status === "Connected") {
+                  statusText = "متصل"
+                }
 
                 return (
                   <tr key={index} style={{ borderBottom: '1px solid var(--card-border)' }}>
-                    <td style={{ padding: '16px', fontWeight: '600' }}>{item.customer}</td>
+                    <td style={{ padding: '16px', fontWeight: '600' }}>
+                      <div>{item.customer}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'right' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>💻 بصمة الحاسب: <code style={{ color: '#00f2fe', background: 'rgba(0,242,254,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', direction: 'ltr' }}>{item.authorizedMachineHash}</code></span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🧪 سيريال الكيمياء: <code style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', direction: 'ltr' }}>{item.authorizedAnalyzerSerial}</code></span>
+                      </div>
+                    </td>
                     <td style={{ padding: '16px' }}><code style={{ color: 'var(--primary)' }}>{item.device}</code> ({item.id})</td>
                     <td style={{ padding: '16px' }}>
-                      <span className={`status-badge ${statusClass}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>
-                        <span className="status-dot" style={{ width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block' }}></span>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 12px',
+                        borderRadius: '20px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        background: isBlocked ? 'rgba(239, 68, 68, 0.15)' : (statusText === 'متصل' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(156, 163, 175, 0.15)'),
+                        color: isBlocked ? '#f87171' : (statusText === 'متصل' ? '#34d399' : '#9ca3af'),
+                        border: `1px solid ${isBlocked ? 'rgba(239, 68, 68, 0.3)' : (statusText === 'متصل' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(156, 163, 175, 0.3)')}`
+                      }}>
+                        <span style={{
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          display: 'inline-block',
+                          background: isBlocked ? '#ef4444' : (statusText === 'متصل' ? '#10b981' : '#9ca3af'),
+                          boxShadow: isBlocked ? '0 0 8px #ef4444' : (statusText === 'متصل' ? '0 0 8px #10b981' : 'none')
+                        }}></span>
                         {statusText}
                       </span>
                     </td>
-                    <td style={{ padding: '16px', color: isOfflineRed ? 'var(--danger)' : 'var(--text-muted)' }}>{item.lastSeen}</td>
+                    <td style={{ padding: '16px', color: isBlocked ? 'var(--danger)' : (isOfflineRed ? 'var(--danger)' : 'var(--text-muted)') }}>{item.lastSeen}</td>
                     <td style={{ padding: '16px' }}>
-                      <div style={{ display: 'flex', gap: '10px' }}>
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                         <button className="action-btn btn-unlock" onClick={() => generateQR('unlock', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 255, 255, 0.1)', color: 'var(--primary)', border: '1px solid rgba(0, 255, 255, 0.2)' }}>🔓 فك الحجب</button>
                         <button className="action-btn btn-test" onClick={() => generateQR('test', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 215, 0, 0.1)', color: 'var(--accent)', border: '1px solid rgba(255, 215, 0, 0.2)' }}>🧪 شحن QR</button>
                         <button className="action-btn btn-quota" onClick={() => setQuotaDevice(item)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' }}>📊 الفحوصات</button>
+                        <button className="action-btn btn-reset-hw" onClick={() => handleResetHardwareLock(item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.25)' }}>🔄 فك قفل العتاد</button>
                         <button className="action-btn btn-copy" onClick={() => handleCopyLink(item.id)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 255, 255, 0.1)', color: 'var(--text)', border: '1px solid rgba(255, 255, 255, 0.2)' }}>🔗 نسخ الرابط</button>
                         <button className="action-btn btn-edit" onClick={() => handleEdit(item)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 150, 255, 0.1)', color: '#00c3ff', border: '1px solid rgba(0, 150, 255, 0.2)' }}>✏️ تعديل</button>
                         <button className="action-btn btn-delete" onClick={() => handleDelete(item.id)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 0, 0, 0.1)', color: 'var(--danger)', border: '1px solid rgba(255, 0, 0, 0.2)' }}>🗑️ حذف</button>
