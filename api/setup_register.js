@@ -49,8 +49,9 @@ export default async function handler(req, res) {
       );
     `);
 
-    // We use a short hash as hardware_id for now if not provided, or we can use the full hash
-    const hardwareId = machine_hash.substring(0, 12);
+    // We use the exact same logic as C# MachineHashGenerator.GetHardwareId() to ensure perfect alignment
+    const cleanHash = machine_hash.replace(/[\/\+=]/g, '').toUpperCase();
+    const hardwareId = cleanHash.length >= 8 ? "GENO-" + cleanHash.substring(0, 8) : "GENO-" + cleanHash;
 
     // Try to find if this device already exists
     const checkRes = await client.query('SELECT hardware_id FROM machines WHERE machine_hash = $1 OR hardware_id = $2', [machine_hash, hardwareId]);
