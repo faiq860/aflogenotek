@@ -86,11 +86,11 @@ export default async function handler(req, res) {
     }
 
     // 2️⃣ البحث عن التوكن والتحقق من صلاحيته
-    // ندعم البحث إما بالتوكن الكامل أو برمز الـ signature/key الفريد
+    // ندعم البحث إما بالتوكن الكامل، أو بالـ signature، أو بالرمز اليدوي القصير
     const tokenKey = token.includes('.') ? token.split('.')[1] : token;
 
     const tokenQuery = await client.query(
-      `SELECT * FROM quota_qr_tokens WHERE token LIKE $1 OR token = $2`,
+      `SELECT * FROM quota_qr_tokens WHERE token LIKE $1 OR token = $2 OR UPPER(manual_code) = UPPER($2)`,
       [`%.${tokenKey}`, token]
     );
 

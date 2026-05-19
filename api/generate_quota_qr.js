@@ -62,21 +62,32 @@ export default async function handler(req, res) {
         is_used BOOLEAN DEFAULT false,
         used_at TIMESTAMP,
         expires_at TIMESTAMP NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMP DEFAULT NOW(),
+        manual_code TEXT
       );
     `);
+
+    // التأكد من وجود عمود manual_code لقاعدة البيانات الحالية
+    try {
+      await client.query(`ALTER TABLE quota_qr_tokens ADD COLUMN IF NOT EXISTS manual_code TEXT;`);
+    } catch (e) {
+      console.log('Column manual_code might already exist:', e.message);
+    }
 
     const hours = validHours || 72; // صلاحية 72 ساعة افتراضياً
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + hours);
 
     const token = generateQuotaToken(deviceId, testCode, quantity, expiresAt);
+    
+    // استخراج كود يدوي قصير ومقروء من التوقيع (أول 8 أحرف بأحرف كبيرة)
+    const manualCode = token.split('.')[1].substring(0, 8).toUpperCase();
 
-    // حفظ الـ token في قاعدة البيانات
+    // حفظ الـ token والرمز اليدوي في قاعدة البيانات
     await client.query(`
-      INSERT INTO quota_qr_tokens (token, device_id, test_code, test_name, quantity, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `, [token, deviceId, testCode, testName, quantity, expiresAt]);
+      INSERT INTO quota_qr_tokens (token, device_id, test_code, test_name, quantity, expires_at, manual_code)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [token, deviceId, testCode, testName, quantity, expiresAt, manualCode]);
 
     // بناء بيانات QR Code (JSON مضغوط)
     const qrData = JSON.stringify({
@@ -96,6 +107,7 @@ export default async function handler(req, res) {
       token,
       qrImageUrl,
       expiresAt: expiresAt.toISOString(),
+      manualCode,
       details: {
         deviceId,
         testCode,
