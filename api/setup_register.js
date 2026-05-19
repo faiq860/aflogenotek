@@ -33,23 +33,43 @@ export default async function handler(req, res) {
 
     await client.connect();
 
+    // Ensure machines table exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS machines (
+        hardware_id TEXT PRIMARY KEY,
+        machine_name TEXT,
+        status TEXT,
+        last_seen TIMESTAMP,
+        machine_hash TEXT,
+        analyzer_serial TEXT,
+        authorized_machine_hash TEXT,
+        authorized_analyzer_serial TEXT,
+        blocked_tests TEXT,
+        blocked_pages TEXT
+      );
+    `);
+
+    // We use a short hash as hardware_id for now if not provided, or we can use the full hash
+    const hardwareId = machine_hash.substring(0, 12);
+
     // Try to find if this device already exists
-    const checkRes = await client.query('SELECT id FROM devices WHERE machine_hash = $1', [machine_hash]);
+    const checkRes = await client.query('SELECT hardware_id FROM machines WHERE machine_hash = $1 OR hardware_id = $2', [machine_hash, hardwareId]);
 
     if (checkRes.rows.length > 0) {
+      const existingId = checkRes.rows[0].hardware_id;
       // Update existing device
       await client.query(
-        `UPDATE devices 
-         SET customer_name = $1, analyzer_serial = $2, device_name = $3, status = 'online', last_seen = NOW()
-         WHERE machine_hash = $4`,
-        [client_name, analyzer_serial || '', ip_address || '', machine_hash]
+        `UPDATE machines 
+         SET machine_name = $1, analyzer_serial = $2, authorized_machine_hash = $3, authorized_analyzer_serial = $4, status = 'online', last_seen = NOW()
+         WHERE hardware_id = $5`,
+        [client_name, analyzer_serial || '', machine_hash, analyzer_serial || '', existingId]
       );
     } else {
-      // Create new device record (we map client_name to customer_name)
+      // Create new device record
       await client.query(
-        `INSERT INTO devices (hardware_id, customer_name, device_name, status, last_seen, machine_hash, analyzer_serial)
-         VALUES ($1, $2, $3, 'online', NOW(), $4, $5)`,
-        [machine_hash.substring(0, 8), client_name, ip_address || '', machine_hash, analyzer_serial || '']
+        `INSERT INTO machines (hardware_id, machine_name, status, last_seen, machine_hash, analyzer_serial, authorized_machine_hash, authorized_analyzer_serial, blocked_tests, blocked_pages)
+         VALUES ($1, $2, 'online', NOW(), $3, $4, $3, $4, '', '')`,
+        [hardwareId, client_name, machine_hash, analyzer_serial || '']
       );
     }
 
