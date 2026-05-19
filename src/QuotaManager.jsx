@@ -96,6 +96,16 @@ export default function QuotaManager({ device, onClose, onGenerateQR }) {
   }
 
   const handleGenerateQR = async (quota) => {
+    const defaultQty = Number(quota.total_quota) > 0 ? Number(quota.total_quota) : 1000;
+    const inputQty = prompt(`أدخل كمية الفحوصات المراد شحنها لـ (${quota.test_code}):`, defaultQty);
+    if (inputQty === null) return; // User cancelled
+    
+    const quantity = Number(inputQty);
+    if (isNaN(quantity) || quantity <= 0) {
+      alert('يرجى إدخال كمية صحيحة أكبر من الصفر');
+      return;
+    }
+
     setGeneratingQR(true)
     try {
       const res = await fetch('/api/generate_quota_qr', {
@@ -105,7 +115,7 @@ export default function QuotaManager({ device, onClose, onGenerateQR }) {
           deviceId: device.id,
           testCode: quota.test_code,
           testName: quota.test_name,
-          quantity: Number(form.renewQty || quota.total_quota || 1000),
+          quantity: quantity,
           validHours: Number(form.validHours || 72)
         })
       })
