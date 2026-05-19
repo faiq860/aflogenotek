@@ -6,7 +6,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { HardwareId, CustomerName, DeviceName, Status, MachineHash, machine_hash, AnalyzerSerial, analyzer_serial } = req.body;
+  const { HardwareId, CustomerName, DeviceName, Status, MachineHash, machine_hash, AnalyzerSerial, analyzer_serial, blocked_tests, blocked_pages } = req.body;
 
   if (!HardwareId) {
     return res.status(400).json({ error: 'Missing HardwareId' });
@@ -37,7 +37,9 @@ export default async function handler(req, res) {
         machine_hash TEXT,
         analyzer_serial TEXT,
         authorized_machine_hash TEXT,
-        authorized_analyzer_serial TEXT
+        authorized_analyzer_serial TEXT,
+        blocked_tests TEXT,
+        blocked_pages TEXT
       );
     `);
 
@@ -46,7 +48,9 @@ export default async function handler(req, res) {
       'machine_hash',
       'analyzer_serial',
       'authorized_machine_hash',
-      'authorized_analyzer_serial'
+      'authorized_analyzer_serial',
+      'blocked_tests',
+      'blocked_pages'
     ];
     for (const col of alterColumns) {
       try {
@@ -76,10 +80,11 @@ export default async function handler(req, res) {
         INSERT INTO machines (
           hardware_id, machine_name, status, last_seen, 
           machine_hash, analyzer_serial, 
-          authorized_machine_hash, authorized_analyzer_serial
+          authorized_machine_hash, authorized_analyzer_serial,
+          blocked_tests, blocked_pages
         )
-        VALUES ($1, $2, $3, NOW(), $4, $5, $4, $5)
-      `, [HardwareId, CustomerName || DeviceName, Status || 'online', incomingMachineHash, incomingAnalyzerSerial]);
+        VALUES ($1, $2, $3, NOW(), $4, $5, $4, $5, $6, $7)
+      `, [HardwareId, CustomerName || DeviceName, Status || 'online', incomingMachineHash, incomingAnalyzerSerial, blocked_tests || '', blocked_pages || '']);
       
       return res.status(200).json({ success: true, message: 'Device registered and bound successfully' });
     }
@@ -131,14 +136,45 @@ export default async function handler(req, res) {
     }
 
     // 5. Update last_seen, active status and current telemetry hashes
+    // Protect database values from being overwritten with empty/null strings
     await client.query(`
       UPDATE machines 
-      SET status = $1, last_seen = NOW(), machine_name = COALESCE($2, machine_name),
-          machine_hash = $3, analyzer_serial = $4
-      WHERE hardware_id = $5
-    `, [Status || 'online', CustomerName || DeviceName, incomingMachineHash, incomingAnalyzerSerial, HardwareId]);
+      SET status = $1, last_seen = NOW(), 
+          machine_name = COALESCE(NULLIF($2, ''), machine_name),
+          machine_hash = COALESCE(NULLIF($3, ''), machine_hash),
+          analyzer_serial = COALESCE(NULLIF($4, ''), analyzer_serial),
+          blocked_tests = COALESCE(NULLIF($5, ''), blocked_tests),
+          blocked_pages = COALESCE(NULLIF($6, ''), blocked_pages)
+      WHERE hardware_id = $7
+    `, [
+      Status || 'online', 
+      CustomerName || DeviceName, 
+      incomingMachineHash, 
+      incomingAnalyzerSerial, 
+      blocked_tests || '', 
+      blocked_pages || '', 
+      HardwareId
+    ]);
 
-    res.status(200).json({ success: true, message: 'Heartbeat received and verified successfully' });
+    // Fetch the updated machine state to return as source-of-truth configuration
+    const currentMachineRes = await client.query(`
+      SELECT machine_name, authorized_machine_hash, authorized_analyzer_serial, blocked_tests, blocked_pages 
+      FROM machines 
+      WHERE hardware_id = $1
+    `, [HardwareId]);
+
+    const currentMachine = currentMachineRes.rows[0];
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Heartbeat received and verified successfully',
+      blocked_tests: currentMachine.blocked_tests || '',
+      blocked_pages: currentMachine.blocked_pages || '',
+      customer_name: currentMachine.machine_name || '',
+      analyzer_serial: currentMachine.authorized_analyzer_serial || currentMachine.analyzer_serial || '',
+      authorized_machine_hash: currentMachine.authorized_machine_hash || '',
+      authorized_analyzer_serial: currentMachine.authorized_analyzer_serial || ''
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message });

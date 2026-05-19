@@ -141,7 +141,7 @@ function App() {
   )
 
   const generateQR = async (type, deviceId, customerName) => {
-    const randomCode = Math.floor(100000 + Math.random() * 900000)
+    const randomCode = Math.floor(1000000000 + Math.random() * 9000000000)
     setManualCode(randomCode.toString())
 
     let dataToEncode = ""
@@ -385,6 +385,12 @@ function App() {
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'right' }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>💻 بصمة الحاسب: <code style={{ color: '#00f2fe', background: 'rgba(0,242,254,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', direction: 'ltr' }}>{item.authorizedMachineHash}</code></span>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🧪 سيريال الكيمياء: <code style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', direction: 'ltr' }}>{item.authorizedAnalyzerSerial}</code></span>
+                        {item.blocked_tests && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🚫 الفحوصات المحجوبة: <code style={{ color: '#f87171', background: 'rgba(239,68,68,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{item.blocked_tests}</code></span>
+                        )}
+                        {item.blocked_pages && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🖥️ الواجهات المحجوبة: <code style={{ color: '#fb7185', background: 'rgba(244,63,94,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{item.blocked_pages}</code></span>
+                        )}
                       </div>
                     </td>
                     <td style={{ padding: '16px' }}><code style={{ color: 'var(--primary)' }}>{item.device}</code> ({item.id})</td>
@@ -412,7 +418,14 @@ function App() {
                         {statusText}
                       </span>
                     </td>
-                    <td style={{ padding: '16px', color: isBlocked ? 'var(--danger)' : (isOfflineRed ? 'var(--danger)' : 'var(--text-muted)') }}>{item.lastSeen}</td>
+                    <td style={{ padding: '16px', color: isBlocked ? 'var(--danger)' : (isOfflineRed ? 'var(--danger)' : 'var(--text-muted)') }}>
+                      <div>{item.lastSeen}</div>
+                      {item.disconnectDuration && (
+                        <div style={{ fontSize: '11px', fontWeight: 'bold', marginTop: '4px', padding: '2px 6px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px', display: 'inline-block' }}>
+                          {item.disconnectDuration}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ padding: '16px' }}>
                       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                         <button className="action-btn btn-unlock" onClick={() => generateQR('unlock', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 255, 255, 0.1)', color: 'var(--primary)', border: '1px solid rgba(0, 255, 255, 0.2)' }}>🔓 فك الحجب</button>
