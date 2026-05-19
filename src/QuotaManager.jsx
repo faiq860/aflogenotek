@@ -144,7 +144,7 @@ export default function QuotaManager({ device, onClose, onGenerateQR }) {
       <img src="${qrModal.qrImageUrl}" width="250" height="250" onload="setTimeout(()=>{window.print();window.close()},300)" />
       <div class="info">
         <b>الكمية:</b> ${qrModal.details?.quantity?.toLocaleString()} فحص<br/>
-        ${qrModal.manualCode ? `<b>الكود اليدوي:</b> <code style="font-size:16px;font-weight:bold;color:#000;background:#e5e5e5;padding:2px 6px;border-radius:4px">${qrModal.manualCode}</code><br/>` : ''}
+        ${qrModal.manualCode ? `<b>الكود اليدوي:</b> <code style="font-size:16px;font-weight:bold;color:#000;background:#e5e5e5;padding:2px 6px;border-radius:4px;direction:ltr;display:inline-block">${qrModal.manualCode}</code><br/>` : ''}
         <b>تنتهي:</b> ${new Date(qrModal.expiresAt).toLocaleString('ar-EG')}
       </div></body></html>`)
     w.document.close()
@@ -258,7 +258,7 @@ export default function QuotaManager({ device, onClose, onGenerateQR }) {
               <div>📦 <b>الكمية:</b> <span style={{color:'#00ffff',fontWeight:'700'}}>{Number(qrModal.details?.quantity).toLocaleString()} فحص</span></div>
               {qrModal.manualCode && (
                 <div style={{ marginTop: '8px', borderTop: '1px solid rgba(0,255,255,0.1)', paddingTop: '8px' }}>
-                  🔑 <b>الكود اليدوي:</b> <code style={{ color: '#ffea00', fontWeight: 'bold', fontSize: '15px', letterSpacing: '1px', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>{qrModal.manualCode}</code>
+                  🔑 <b>الكود اليدوي:</b> <code style={{ color: '#ffea00', fontWeight: 'bold', fontSize: '15px', letterSpacing: '1px', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px', direction: 'ltr', display: 'inline-block' }}>{qrModal.manualCode}</code>
                 </div>
               )}
               <div style={{ marginTop: '8px' }}>⏱️ <b>تنتهي الصلاحية:</b> {new Date(qrModal.expiresAt).toLocaleString('ar-EG')}</div>
