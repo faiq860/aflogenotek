@@ -89,17 +89,20 @@ export default async function handler(req, res) {
       VALUES ($1, $2, $3, $4, $5, $6, $7)
     `, [token, deviceId, testCode, testName, quantity, expiresAt, manualCode]);
 
-    // بناء بيانات QR Code (JSON مضغوط)
-    const qrData = JSON.stringify({
-      t: 'Q', // type: QUOTA
-      d: deviceId,
-      c: testCode,
-      q: quantity,
-      k: token.split('.')[1] // الـ signature فقط للتحقق
-    });
+    // حفظ الرمز اليدوي في جدول allowed_qr ليتعرف عليه الـ Overlay مباشرة
+    // device_id = 'UNIFIED' لأن الـ Overlay يقبل أي رمز UNIFIED بغض النظر عن الجهاز
+    try {
+      await client.query(`
+        INSERT INTO allowed_qr (qr_hash, test_id, quantity, expires_at, device_id, used)
+        VALUES ($1, $2, $3, $4, 'UNIFIED', false)
+        ON CONFLICT (qr_hash) DO NOTHING
+      `, [manualCode, testCode, quantity, expiresAt]);
+    } catch (e) {
+      console.log('allowed_qr insert warning:', e.message);
+    }
 
-    // توليد رابط QR
-    const encodedData = encodeURIComponent(token);
+    // توليد رابط QR — يحتوي على الرمز اليدوي القصير ليتطابق مع ما في قاعدة البيانات
+    const encodedData = encodeURIComponent(manualCode);
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodedData}&bgcolor=ffffff&color=0b0f19&margin=10`;
 
     res.status(200).json({
