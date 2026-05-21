@@ -189,9 +189,9 @@ export default function App() {
 
   const handleSaveEdit = async () => {
     try {
-      const res = await fetch('/api/update_device', {
+      const res = await fetch('/api/device_ops', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hardwareId: currentDevice.id, customerName: newCustomerName })
+        body: JSON.stringify({ action: 'update', hardwareId: currentDevice.id, customerName: newCustomerName })
       })
       const data = await res.json()
       if (data.success) { setEditModalOpen(false); fetchDevices(); alert('تم التعديل بنجاح!') }
@@ -201,9 +201,9 @@ export default function App() {
   const handleDelete = async (hardwareId) => {
     if (!window.confirm('هل أنت متأكد من الحذف النهائي؟')) return
     try {
-      const res = await fetch('/api/delete_device', {
+      const res = await fetch('/api/device_ops', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hardwareId })
+        body: JSON.stringify({ action: 'delete', hardwareId })
       })
       const data = await res.json()
       if (data.success) { fetchDevices(); alert('تم الحذف!') }
@@ -213,9 +213,9 @@ export default function App() {
   const handleResetHardwareLock = async (hardwareId, customerName) => {
     if (!window.confirm(`فك قفل العتاد لـ ${customerName}؟`)) return
     try {
-      const res = await fetch('/api/update_device', {
+      const res = await fetch('/api/device_ops', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hardwareId, resetHardwareLock: true })
+        body: JSON.stringify({ action: 'reset_lock', hardwareId })
       })
       const data = await res.json()
       if (data.success) { alert('تم فك قفل العتاد!'); fetchDevices() }
