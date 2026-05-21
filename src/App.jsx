@@ -64,7 +64,8 @@ export default function App() {
   const [fiTests,           setFiTests]             = useState({})
   const [fiGroup,           setFiGroup]             = useState('')
   const [fiGroupQty,        setFiGroupQty]          = useState(100)
-  const [activeTab,         setActiveTab]           = useState('devices') // devices | activity
+  const [activeTab,         setActiveTab]           = useState('devices')
+  const [activityDevice,    setActivityDevice]      = useState(null)
 
   // ── fetch helpers ────────────────────────────────────────────────────────────
   const fetchDevices = useCallback(async () => {
@@ -409,11 +410,12 @@ export default function App() {
 
       {/* ── Tab bar ── */}
       <div style={{ display:'flex', gap:'4px', marginBottom:'16px' }}>
-        {[['devices','الأجهزة والعملاء'],['activity','سجل النشاط']].map(([id, label]) => (
-          <button key={id} onClick={() => setActiveTab(id)} style={{ padding:'8px 20px', background: activeTab===id ? '#4facfe' : 'rgba(255,255,255,0.04)', color: activeTab===id ? '#0b0f19' : 'rgba(255,255,255,0.6)', border:`1px solid ${activeTab===id ? '#4facfe' : 'rgba(255,255,255,0.08)'}`, borderRadius:'8px', cursor:'pointer', fontWeight:'700', fontSize:'13px' }}>
-            {label}
-          </button>
-        ))}
+        <button onClick={() => setActiveTab('devices')} style={{ padding:'8px 20px', background:'#4facfe', color:'#0b0f19', border:'1px solid #4facfe', borderRadius:'8px', cursor:'pointer', fontWeight:'700', fontSize:'13px' }}>
+          الأجهزة والعملاء
+        </button>
+        <span style={{ fontSize:'12px', color:'rgba(255,255,255,0.3)', alignSelf:'center' }}>
+          📋 انقر على اسم العميل لعرض نشاطه
+        </span>
       </div>
 
       {/* ── Devices Table ── */}
@@ -436,9 +438,15 @@ export default function App() {
 
                 return (
                   <tr key={idx} style={{ borderBottom:'1px solid rgba(255,255,255,0.04)', background: isAlerted ? 'rgba(239,68,68,0.04)' : 'transparent' }}>
-                    {/* Customer */}
+                    {/* Customer — click to open activity */}
                     <td style={{ padding:'14px 16px' }}>
-                      <div style={{ fontWeight:'600', color:'white', fontSize:'14px' }}>{item.customer}</div>
+                      <div
+                        onClick={() => setActivityDevice(item)}
+                        style={{ fontWeight:'700', color:'#4facfe', fontSize:'14px', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:'6px' }}
+                        title="انقر لعرض سجل النشاط"
+                      >
+                        📋 {item.customer}
+                      </div>
                       <div style={{ fontSize:'10px', color:'rgba(255,255,255,0.3)', marginTop:'4px' }}>
                         💻 {item.authorizedMachineHash || '—'}
                         {item.authorizedAnalyzerSerial && <span style={{ marginRight:'10px' }}>🧪 {item.authorizedAnalyzerSerial}</span>}
@@ -496,14 +504,9 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Activity Tab ── */}
-      {activeTab === 'activity' && (
-        <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'12px', padding:'20px' }}>
-          <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'13px', marginBottom:'12px' }}>
-            سجل النشاط يعرض العمليات المسجلة من الأجهزة عبر LAN. يتطلب تفعيل خاصية machine_activity_log في قاعدة البيانات.
-          </div>
-          <ActivityLog devices={devices} />
-        </div>
+      {/* ── Device Activity Modal ── */}
+      {activityDevice && (
+        <DeviceActivityModal device={activityDevice} onClose={() => setActivityDevice(null)} />
       )}
 
       {/* ── Modals ── */}
@@ -533,6 +536,116 @@ function ActionBtn({ color, onClick, children }) {
 function hexToRgb(hex) {
   const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
   return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '255,255,255'
+}
+
+// ─── Device Activity Modal ────────────────────────────────────────────────────
+function DeviceActivityModal({ device, onClose }) {
+  const [dbLogs, setDbLogs] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  // Build immediate events from device data already in memory (no API needed)
+  const instant = []
+  const ts = device.lastSeen || device.last_seen
+  if (ts) {
+    const h = Math.floor((Date.now() - new Date(ts).getTime()) / 3600000)
+    instant.push({
+      type: device.status === 'blocked' ? 'BLOCKED' : device.status === 'online' ? 'HEARTBEAT' : 'DISCONNECTED',
+      details: device.status === 'blocked'
+        ? 'الجهاز محجوب — تم كشف تلاعب بالعتاد'
+        : device.status === 'online'
+        ? 'نبضة قلب — الجهاز متصل بنجاح'
+        : `انقطع الاتصال منذ ${h} ساعة`,
+      time: ts, src: 'live'
+    })
+  }
+  if (device.blocked_tests) {
+    instant.push({ type: 'BLOCKED_TESTS', details: `فحوصات محجوبة: ${device.blocked_tests}`, time: ts, src: 'live' })
+  }
+  if (device.authorizedMachineHash && device.authorizedMachineHash !== '—' && device.authorizedMachineHash !== 'مجهول') {
+    instant.push({ type: 'HARDWARE_BIND', details: `بصمة الحاسب: ${device.authorizedMachineHash}`, time: ts, src: 'live' })
+  }
+  if (device.authorizedAnalyzerSerial && device.authorizedAnalyzerSerial !== 'مجهول' && device.authorizedAnalyzerSerial !== 'مفتوح/غير مقيد') {
+    instant.push({ type: 'ANALYZER_BIND', details: `المحلل المرتبط: ${device.authorizedAnalyzerSerial}`, time: ts, src: 'live' })
+  }
+
+  useEffect(() => {
+    fetch(`/api/monitoring?scope=activity&hardware_id=${encodeURIComponent(device.id)}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => { setDbLogs(d.logs || []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [device.id])
+
+  const allLogs = dbLogs.length > 0
+    ? dbLogs
+    : instant.map((e, i) => ({ ...e, id: i, event_type: e.type, logged_at: e.time }))
+
+  const typeColor = { HEARTBEAT:'#34d399', DISCONNECTED:'#f59e0b', BLOCKED:'#ef4444',
+    BLOCKED_TESTS:'#f87171', HARDWARE_BIND:'#4facfe', ANALYZER_BIND:'#a78bfa',
+    PC_SWAP_DETECTED:'#ef4444', ANALYZER_SWAP_DETECTED:'#ef4444', TAMPER_DETECTED:'#ef4444' }
+
+  return (
+    <Overlay onClick={onClose}>
+      <ModalBox style={{ maxWidth:'640px', maxHeight:'82vh', overflowY:'auto', textAlign:'right' }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'16px' }}>
+          <div>
+            <div style={{ fontSize:'17px', fontWeight:'800', color:'#4facfe' }}>📋 سجل نشاط العميل</div>
+            <div style={{ fontSize:'13px', color:'rgba(255,255,255,0.5)', marginTop:'3px' }}>{device.customer}</div>
+          </div>
+          <button onClick={onClose} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', cursor:'pointer', fontSize:'20px', lineHeight:1 }}>✕</button>
+        </div>
+
+        {/* Device summary cards */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'8px', marginBottom:'16px' }}>
+          {[
+            { label:'الحالة', value: device.status === 'online' ? '● متصل' : device.status === 'blocked' ? '⛔ محظور' : '○ منقطع',
+              color: device.status === 'online' ? '#34d399' : device.status === 'blocked' ? '#ef4444' : '#f59e0b' },
+            { label:'آخر اتصال', value: formatDuration(device.lastSeen || device.last_seen), color:'rgba(255,255,255,0.7)' },
+            { label:'معرف الجهاز', value: device.id ? device.id.substring(0,12)+'...' : '—', color:'rgba(255,255,255,0.5)' },
+          ].map((c, i) => (
+            <div key={i} style={{ background:'rgba(255,255,255,0.04)', borderRadius:'8px', padding:'10px', border:'1px solid rgba(255,255,255,0.07)' }}>
+              <div style={{ fontSize:'10px', color:'rgba(255,255,255,0.35)', marginBottom:'4px' }}>{c.label}</div>
+              <div style={{ fontSize:'12px', fontWeight:'700', color:c.color }}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Log entries */}
+        <div style={{ background:'rgba(0,0,0,0.3)', borderRadius:'8px', padding:'12px', border:'1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
+            <span style={{ fontSize:'12px', fontWeight:'700', color:'rgba(255,255,255,0.5)' }}>
+              {loading ? '⏳ جاري التحميل...' : dbLogs.length > 0 ? `${dbLogs.length} حدث من قاعدة البيانات` : 'البيانات الفورية (لا يوجد سجل مخزّن بعد)'}
+            </span>
+            {!loading && dbLogs.length === 0 && (
+              <span style={{ fontSize:'10px', color:'rgba(255,255,255,0.25)' }}>⚡ مباشر من الذاكرة</span>
+            )}
+          </div>
+
+          <div style={{ fontFamily:'Consolas,monospace', fontSize:'12px', maxHeight:'340px', overflowY:'auto' }}>
+            {allLogs.length === 0
+              ? <div style={{ color:'rgba(255,255,255,0.25)', textAlign:'center', padding:'20px' }}>لا توجد سجلات</div>
+              : allLogs.map((log, i) => {
+                  const evType = log.event_type || log.type || ''
+                  const color  = typeColor[evType] || 'rgba(255,255,255,0.6)'
+                  const logTime = log.logged_at || log.time
+                  return (
+                    <div key={i} style={{ display:'flex', gap:'10px', padding:'6px 4px', borderBottom:'1px solid rgba(255,255,255,0.04)', alignItems:'flex-start' }}>
+                      <span style={{ color:'rgba(255,255,255,0.25)', whiteSpace:'nowrap', fontSize:'11px', minWidth:'130px' }}>
+                        {logTime ? new Date(logTime).toLocaleString('ar-IQ') : '—'}
+                      </span>
+                      <span style={{ color, fontWeight:'700', whiteSpace:'nowrap', fontSize:'11px', minWidth:'120px' }}>{evType}</span>
+                      <span style={{ color:'rgba(255,255,255,0.7)', fontSize:'11px' }}>{log.details || log.data || '—'}</span>
+                    </div>
+                  )
+                })
+            }
+          </div>
+        </div>
+
+      </ModalBox>
+    </Overlay>
+  )
 }
 
 // ─── Activity Log ─────────────────────────────────────────────────────────────
