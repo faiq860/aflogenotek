@@ -540,108 +540,190 @@ function hexToRgb(hex) {
 
 // ─── Device Activity Modal ────────────────────────────────────────────────────
 function DeviceActivityModal({ device, onClose }) {
-  const [dbLogs, setDbLogs] = useState([])
+  const [dbLogs,  setDbLogs]  = useState([])
+  const [quotas,  setQuotas]  = useState([])
   const [loading, setLoading] = useState(true)
+  const [section, setSection] = useState('quotas') // quotas | log
 
-  // Build immediate events from device data already in memory (no API needed)
-  const instant = []
+  // Instant events from already-loaded device data (no API needed)
   const ts = device.lastSeen || device.last_seen
+  const instant = []
   if (ts) {
     const h = Math.floor((Date.now() - new Date(ts).getTime()) / 3600000)
     instant.push({
-      type: device.status === 'blocked' ? 'BLOCKED' : device.status === 'online' ? 'HEARTBEAT' : 'DISCONNECTED',
-      details: device.status === 'blocked'
-        ? 'الجهاز محجوب — تم كشف تلاعب بالعتاد'
-        : device.status === 'online'
-        ? 'نبضة قلب — الجهاز متصل بنجاح'
-        : `انقطع الاتصال منذ ${h} ساعة`,
-      time: ts, src: 'live'
+      event_type: device.status === 'blocked' ? 'BLOCKED' : device.status === 'online' ? 'HEARTBEAT' : 'DISCONNECTED',
+      details: device.status === 'blocked' ? 'الجهاز محجوب — تم كشف تلاعب بالعتاد'
+             : device.status === 'online'   ? 'نبضة قلب — الجهاز متصل بنجاح'
+             : `انقطع الاتصال منذ ${h} ساعة`,
+      logged_at: ts
     })
   }
-  if (device.blocked_tests) {
-    instant.push({ type: 'BLOCKED_TESTS', details: `فحوصات محجوبة: ${device.blocked_tests}`, time: ts, src: 'live' })
-  }
-  if (device.authorizedMachineHash && device.authorizedMachineHash !== '—' && device.authorizedMachineHash !== 'مجهول') {
-    instant.push({ type: 'HARDWARE_BIND', details: `بصمة الحاسب: ${device.authorizedMachineHash}`, time: ts, src: 'live' })
-  }
-  if (device.authorizedAnalyzerSerial && device.authorizedAnalyzerSerial !== 'مجهول' && device.authorizedAnalyzerSerial !== 'مفتوح/غير مقيد') {
-    instant.push({ type: 'ANALYZER_BIND', details: `المحلل المرتبط: ${device.authorizedAnalyzerSerial}`, time: ts, src: 'live' })
-  }
+  if (device.blocked_tests)
+    instant.push({ event_type:'BLOCKED_TESTS', details:`فحوصات محجوبة: ${device.blocked_tests}`, logged_at:ts })
+  if (device.authorizedMachineHash && !['—','مجهول'].includes(device.authorizedMachineHash))
+    instant.push({ event_type:'HARDWARE_BIND', details:`بصمة الحاسب: ${device.authorizedMachineHash}`, logged_at:ts })
+  if (device.authorizedAnalyzerSerial && !['مجهول','مفتوح/غير مقيد'].includes(device.authorizedAnalyzerSerial))
+    instant.push({ event_type:'ANALYZER_BIND', details:`المحلل: ${device.authorizedAnalyzerSerial}`, logged_at:ts })
 
   useEffect(() => {
-    fetch(`/api/monitoring?scope=activity&hardware_id=${encodeURIComponent(device.id)}`)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => { setDbLogs(d.logs || []); setLoading(false) })
-      .catch(() => setLoading(false))
+    Promise.all([
+      fetch(`/api/monitoring?scope=activity&hardware_id=${encodeURIComponent(device.id)}`).then(r => r.ok ? r.json() : {}),
+      fetch(`/api/test_quotas?device_id=${encodeURIComponent(device.id)}`).then(r => r.ok ? r.json() : {})
+    ]).then(([actData, qData]) => {
+      setDbLogs(actData.logs || [])
+      setQuotas(qData.quotas || [])
+      setLoading(false)
+    }).catch(() => setLoading(false))
   }, [device.id])
 
-  const allLogs = dbLogs.length > 0
-    ? dbLogs
-    : instant.map((e, i) => ({ ...e, id: i, event_type: e.type, logged_at: e.time }))
-
-  const typeColor = { HEARTBEAT:'#34d399', DISCONNECTED:'#f59e0b', BLOCKED:'#ef4444',
+  const allLogs = dbLogs.length > 0 ? dbLogs : instant
+  const typeColor = {
+    HEARTBEAT:'#34d399', DISCONNECTED:'#f59e0b', BLOCKED:'#ef4444',
     BLOCKED_TESTS:'#f87171', HARDWARE_BIND:'#4facfe', ANALYZER_BIND:'#a78bfa',
-    PC_SWAP_DETECTED:'#ef4444', ANALYZER_SWAP_DETECTED:'#ef4444', TAMPER_DETECTED:'#ef4444' }
+    PC_SWAP_DETECTED:'#ef4444', ANALYZER_SWAP_DETECTED:'#ef4444', TAMPER_DETECTED:'#ef4444'
+  }
+
+  // Quota stats
+  const totalTests    = quotas.length
+  const depleted      = quotas.filter(q => Number(q.total_quota) - Number(q.used_count) <= 0).length
+  const lowWarning    = quotas.filter(q => {
+    const rem = Number(q.total_quota) - Number(q.used_count)
+    const pct = q.total_quota > 0 ? (rem / q.total_quota) * 100 : 0
+    return rem > 0 && pct <= (q.alert_threshold || 20)
+  }).length
+
+  const tabBtn = (id, label) => (
+    <button onClick={() => setSection(id)} style={{
+      padding:'6px 16px', borderRadius:'6px', cursor:'pointer', fontSize:'12px', fontWeight:'700',
+      background: section === id ? '#4facfe' : 'rgba(255,255,255,0.05)',
+      color:       section === id ? '#0b0f19' : 'rgba(255,255,255,0.5)',
+      border:     `1px solid ${section === id ? '#4facfe' : 'rgba(255,255,255,0.1)'}`
+    }}>{label}</button>
+  )
 
   return (
     <Overlay onClick={onClose}>
-      <ModalBox style={{ maxWidth:'640px', maxHeight:'82vh', overflowY:'auto', textAlign:'right' }} onClick={e => e.stopPropagation()}>
+      <ModalBox style={{ maxWidth:'660px', maxHeight:'88vh', overflowY:'auto', textAlign:'right' }} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'16px' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'14px' }}>
           <div>
-            <div style={{ fontSize:'17px', fontWeight:'800', color:'#4facfe' }}>📋 سجل نشاط العميل</div>
-            <div style={{ fontSize:'13px', color:'rgba(255,255,255,0.5)', marginTop:'3px' }}>{device.customer}</div>
+            <div style={{ fontSize:'17px', fontWeight:'800', color:'#4facfe' }}>📋 نشاط العميل</div>
+            <div style={{ fontSize:'13px', color:'rgba(255,255,255,0.5)', marginTop:'2px' }}>{device.customer}</div>
           </div>
-          <button onClick={onClose} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', cursor:'pointer', fontSize:'20px', lineHeight:1 }}>✕</button>
+          <button onClick={onClose} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', cursor:'pointer', fontSize:'20px' }}>✕</button>
         </div>
 
-        {/* Device summary cards */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'8px', marginBottom:'16px' }}>
+        {/* Status cards */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'7px', marginBottom:'14px' }}>
           {[
-            { label:'الحالة', value: device.status === 'online' ? '● متصل' : device.status === 'blocked' ? '⛔ محظور' : '○ منقطع',
-              color: device.status === 'online' ? '#34d399' : device.status === 'blocked' ? '#ef4444' : '#f59e0b' },
-            { label:'آخر اتصال', value: formatDuration(device.lastSeen || device.last_seen), color:'rgba(255,255,255,0.7)' },
-            { label:'معرف الجهاز', value: device.id ? device.id.substring(0,12)+'...' : '—', color:'rgba(255,255,255,0.5)' },
+            { label:'الحالة', value: device.status==='online' ? '● متصل' : device.status==='blocked' ? '⛔ محظور' : '○ منقطع',
+              color: device.status==='online' ? '#34d399' : device.status==='blocked' ? '#ef4444' : '#f59e0b' },
+            { label:'آخر اتصال', value: formatDuration(ts), color:'rgba(255,255,255,0.7)' },
+            { label:'فحوصات نشطة', value: loading ? '...' : totalTests, color:'#4facfe' },
+            { label:'منتهية / تحذير', value: loading ? '...' : `${depleted} / ${lowWarning}`,
+              color: depleted > 0 ? '#ef4444' : lowWarning > 0 ? '#f59e0b' : '#34d399' },
           ].map((c, i) => (
-            <div key={i} style={{ background:'rgba(255,255,255,0.04)', borderRadius:'8px', padding:'10px', border:'1px solid rgba(255,255,255,0.07)' }}>
-              <div style={{ fontSize:'10px', color:'rgba(255,255,255,0.35)', marginBottom:'4px' }}>{c.label}</div>
-              <div style={{ fontSize:'12px', fontWeight:'700', color:c.color }}>{c.value}</div>
+            <div key={i} style={{ background:'rgba(255,255,255,0.04)', borderRadius:'8px', padding:'9px 10px', border:'1px solid rgba(255,255,255,0.07)' }}>
+              <div style={{ fontSize:'10px', color:'rgba(255,255,255,0.3)', marginBottom:'3px' }}>{c.label}</div>
+              <div style={{ fontSize:'13px', fontWeight:'700', color:c.color }}>{c.value}</div>
             </div>
           ))}
         </div>
 
-        {/* Log entries */}
-        <div style={{ background:'rgba(0,0,0,0.3)', borderRadius:'8px', padding:'12px', border:'1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
-            <span style={{ fontSize:'12px', fontWeight:'700', color:'rgba(255,255,255,0.5)' }}>
-              {loading ? '⏳ جاري التحميل...' : dbLogs.length > 0 ? `${dbLogs.length} حدث من قاعدة البيانات` : 'البيانات الفورية (لا يوجد سجل مخزّن بعد)'}
-            </span>
-            {!loading && dbLogs.length === 0 && (
-              <span style={{ fontSize:'10px', color:'rgba(255,255,255,0.25)' }}>⚡ مباشر من الذاكرة</span>
-            )}
-          </div>
+        {/* Section tabs */}
+        <div style={{ display:'flex', gap:'8px', marginBottom:'12px' }}>
+          {tabBtn('quotas', `📊 استهلاك الفحوصات${totalTests ? ` (${totalTests})` : ''}`)}
+          {tabBtn('log',    `📜 سجل الأحداث${allLogs.length ? ` (${allLogs.length})` : ''}`)}
+        </div>
 
-          <div style={{ fontFamily:'Consolas,monospace', fontSize:'12px', maxHeight:'340px', overflowY:'auto' }}>
-            {allLogs.length === 0
-              ? <div style={{ color:'rgba(255,255,255,0.25)', textAlign:'center', padding:'20px' }}>لا توجد سجلات</div>
-              : allLogs.map((log, i) => {
-                  const evType = log.event_type || log.type || ''
-                  const color  = typeColor[evType] || 'rgba(255,255,255,0.6)'
-                  const logTime = log.logged_at || log.time
+        {/* ── QUOTA SECTION ── */}
+        {section === 'quotas' && (
+          <div>
+            {loading ? (
+              <div style={{ textAlign:'center', padding:'30px', color:'rgba(255,255,255,0.3)' }}>⏳ جاري تحميل بيانات الفحوصات...</div>
+            ) : quotas.length === 0 ? (
+              <div style={{ textAlign:'center', padding:'30px', color:'rgba(255,255,255,0.2)', fontSize:'13px' }}>
+                لم يتم تفعيل فحوصات لهذا الجهاز بعد
+              </div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+                {quotas.map((q, i) => {
+                  const total     = Number(q.total_quota)
+                  const used      = Number(q.used_count)
+                  const remaining = Math.max(0, total - used)
+                  const pct       = total > 0 ? Math.round((used / total) * 100) : 0
+                  const remPct    = 100 - pct
+                  const isDepleted = remaining <= 0
+                  const isLow      = !isDepleted && remPct <= (q.alert_threshold || 20)
+                  const barColor   = isDepleted ? '#ef4444' : isLow ? '#f59e0b' : '#34d399'
+
                   return (
-                    <div key={i} style={{ display:'flex', gap:'10px', padding:'6px 4px', borderBottom:'1px solid rgba(255,255,255,0.04)', alignItems:'flex-start' }}>
-                      <span style={{ color:'rgba(255,255,255,0.25)', whiteSpace:'nowrap', fontSize:'11px', minWidth:'130px' }}>
-                        {logTime ? new Date(logTime).toLocaleString('ar-IQ') : '—'}
-                      </span>
-                      <span style={{ color, fontWeight:'700', whiteSpace:'nowrap', fontSize:'11px', minWidth:'120px' }}>{evType}</span>
-                      <span style={{ color:'rgba(255,255,255,0.7)', fontSize:'11px' }}>{log.details || log.data || '—'}</span>
+                    <div key={i} style={{
+                      padding:'10px 14px', borderRadius:'8px',
+                      background: isDepleted ? 'rgba(239,68,68,0.07)' : isLow ? 'rgba(245,158,11,0.07)' : 'rgba(255,255,255,0.03)',
+                      border:`1px solid ${isDepleted ? 'rgba(239,68,68,0.25)' : isLow ? 'rgba(245,158,11,0.25)' : 'rgba(255,255,255,0.07)'}`
+                    }}>
+                      {/* Test name + status */}
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'7px' }}>
+                        <span style={{ fontWeight:'700', color: isDepleted ? '#f87171' : isLow ? '#fbbf24' : 'white', fontSize:'13px' }}>
+                          {isDepleted ? '🔴' : isLow ? '🟡' : '🟢'} {q.test_code}
+                          {q.test_name && q.test_name !== q.test_code && <span style={{ fontWeight:'400', color:'rgba(255,255,255,0.4)', fontSize:'11px', marginRight:'6px' }}> — {q.test_name}</span>}
+                        </span>
+                        <span style={{ fontSize:'11px', color:'rgba(255,255,255,0.4)' }}>
+                          {isDepleted ? <span style={{ color:'#ef4444', fontWeight:'700' }}>نفد الرصيد</span>
+                           : isLow     ? <span style={{ color:'#f59e0b', fontWeight:'700' }}>رصيد منخفض</span>
+                           : null}
+                        </span>
+                      </div>
+
+                      {/* Progress bar */}
+                      <div style={{ background:'rgba(255,255,255,0.08)', borderRadius:'4px', height:'6px', marginBottom:'6px', overflow:'hidden' }}>
+                        <div style={{ height:'100%', width:`${pct}%`, background:barColor, borderRadius:'4px', transition:'width 0.3s' }} />
+                      </div>
+
+                      {/* Numbers */}
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:'rgba(255,255,255,0.4)' }}>
+                        <span>مُستخدم: <span style={{ color:'rgba(255,255,255,0.7)', fontWeight:'600' }}>{used}</span></span>
+                        <span>متبقي: <span style={{ color:barColor, fontWeight:'700' }}>{remaining}</span></span>
+                        <span>الإجمالي: <span style={{ color:'rgba(255,255,255,0.6)' }}>{total}</span></span>
+                        <span style={{ color: pct >= 80 ? '#f87171' : 'rgba(255,255,255,0.4)' }}>{pct}% مُستهلَك</span>
+                      </div>
                     </div>
                   )
-                })
-            }
+                })}
+              </div>
+            )}
           </div>
-        </div>
+        )}
+
+        {/* ── LOG SECTION ── */}
+        {section === 'log' && (
+          <div style={{ background:'rgba(0,0,0,0.3)', borderRadius:'8px', padding:'12px', border:'1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ fontSize:'11px', color:'rgba(255,255,255,0.3)', marginBottom:'8px' }}>
+              {loading ? '⏳ جاري التحميل...' : dbLogs.length > 0 ? `${dbLogs.length} حدث من قاعدة البيانات` : '⚡ بيانات فورية من الذاكرة'}
+            </div>
+            <div style={{ fontFamily:'Consolas,monospace', fontSize:'11px', maxHeight:'320px', overflowY:'auto' }}>
+              {allLogs.length === 0
+                ? <div style={{ color:'rgba(255,255,255,0.2)', textAlign:'center', padding:'20px' }}>لا توجد سجلات</div>
+                : allLogs.map((log, i) => {
+                    const evType   = log.event_type || ''
+                    const color    = typeColor[evType] || 'rgba(255,255,255,0.6)'
+                    const logTime  = log.logged_at || log.time
+                    return (
+                      <div key={i} style={{ display:'flex', gap:'8px', padding:'5px 2px', borderBottom:'1px solid rgba(255,255,255,0.04)', alignItems:'flex-start' }}>
+                        <span style={{ color:'rgba(255,255,255,0.2)', whiteSpace:'nowrap', minWidth:'128px' }}>
+                          {logTime ? new Date(logTime).toLocaleString('ar-IQ') : '—'}
+                        </span>
+                        <span style={{ color, fontWeight:'700', whiteSpace:'nowrap', minWidth:'110px' }}>{evType}</span>
+                        <span style={{ color:'rgba(255,255,255,0.65)' }}>{log.details || log.data || '—'}</span>
+                      </div>
+                    )
+                  })
+              }
+            </div>
+          </div>
+        )}
 
       </ModalBox>
     </Overlay>
