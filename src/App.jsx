@@ -1,440 +1,465 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import './App.css'
 import QuotaManager from './QuotaManager'
 
-function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [devices, setDevices] = useState([])
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editModalOpen, setEditModalOpen] = useState(false)
-  const [currentDevice, setCurrentDevice] = useState(null)
-  const [newCustomerName, setNewCustomerName] = useState('')
-  const [modalTitle, setModalTitle] = useState('')
-  const [modalDesc, setModalDesc] = useState('')
-  const [manualCode, setManualCode] = useState('------')
-  const [qrSrc, setQrSrc] = useState('')
-  const [hardwareIdParam, setHardwareIdParam] = useState('')
-  const [registerModalOpen, setRegisterModalOpen] = useState(false)
-  const [quotaDevice, setQuotaDevice] = useState(null)
+// ─── helpers ─────────────────────────────────────────────────────────────────
+const hoursAgo = (ts) => {
+  if (!ts) return Infinity
+  return (Date.now() - new Date(ts).getTime()) / 3600000
+}
 
-  // البيانات التجريبية كاحتياط
-  const mockData = [
-    { customer: "مختبر الحياة التخصصي", device: "BioAnalyzer-3000", status: "online", lastSeen: "الآن", id: "DEV-8891" },
-    { customer: "مستشفى الأمل", device: "Genotek-X1", status: "online", lastSeen: "منذ 5 دقائق", id: "DEV-1102" },
-    { customer: "مختبر بابل المركزي", device: "BioAnalyzer-2000", status: "offline", lastSeen: "منذ 4 أيام", id: "DEV-0045" },
-    { customer: "عيادة الشفاء", device: "Genotek-X1", status: "online", lastSeen: "منذ ساعة", id: "DEV-7762" }
-  ]
+const formatDuration = (ts) => {
+  if (!ts) return '—'
+  const h = Math.floor(hoursAgo(ts))
+  if (h < 1)  return 'Just now'
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ${h % 24}h ago`
+}
 
-  useEffect(() => {
-    const logged = localStorage.getItem("isLoggedIn") === "true"
-    setIsLoggedIn(logged)
-    if (logged) {
-      fetchDevices()
-    }
+const TEST_GROUPS = {
+  'RFT (Renal)':  ['BUN', 'CREATININE', 'URIC_ACID'],
+  'LFT (Liver)':  ['AST', 'ALT', 'BILIRUBIN_TOTAL', 'ALBUMIN', 'TOTAL_PROTEIN'],
+  'LIPIDS':       ['CHOLESTEROL', 'TRIGLYCERIDES', 'HDL', 'LDL'],
+  'TFT (Thyroid)':['TSH', 'FREE_T4'],
+  'ELECTROLYTES': ['SODIUM', 'POTASSIUM', 'CHLORIDE'],
+  'MINERALS':     ['CALCIUM', 'PHOSPHORUS'],
+}
 
-    // التحقق من وجود hardware_id في الرابط
-    const params = new URLSearchParams(window.location.search)
-    const hwId = params.get('hardware_id')
-    if (hwId) {
-      setHardwareIdParam(hwId)
-      setRegisterModalOpen(true)
-    }
+const ALL_TESTS = [
+  'GLUCOSE','ALBUMIN','TOTAL_PROTEIN','AST','ALT','BILIRUBIN_TOTAL',
+  'CREATININE','BUN','CALCIUM','PHOSPHORUS','SODIUM','POTASSIUM','CHLORIDE',
+  'TRIGLYCERIDES','CHOLESTEROL','HDL','LDL','TSH','FREE_T4','URIC_ACID','GLUCOSE_FASTING'
+]
 
-    // التحقق من المسار
-    if (window.location.pathname === '/register') {
-      setRegisterModalOpen(true)
-    }
-  }, [])
+// ─── mock data ────────────────────────────────────────────────────────────────
+const MOCK = [
+  { customer:'مختبر الحياة التخصصي', device:'BioAnalyzer-3000', status:'online',  id:'DEV-8891', lastSeen: new Date().toISOString(), blocked_tests:'', authorizedMachineHash:'PC-A1B2C3' },
+  { customer:'مستشفى الأمل',          device:'Genotek-X1',       status:'online',  id:'DEV-1102', lastSeen: new Date(Date.now()-3*3600000).toISOString(), blocked_tests:'GLUCOSE,AST', authorizedMachineHash:'PC-D4E5F6' },
+  { customer:'مختبر بابل المركزي',    device:'BioAnalyzer-2000', status:'offline', id:'DEV-0045', lastSeen: new Date(Date.now()-96*3600000).toISOString(), blocked_tests:'', authorizedMachineHash:'PC-G7H8I9' },
+  { customer:'عيادة الشفاء',          device:'Genotek-X1',       status:'online',  id:'DEV-7762', lastSeen: new Date(Date.now()-60*60000).toISOString(), blocked_tests:'CREATININE', authorizedMachineHash:'PC-J1K2L3' },
+]
 
-  const fetchDevices = async () => {
+// ─── App ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [isLoggedIn,        setIsLoggedIn]        = useState(false)
+  const [username,          setUsername]           = useState('')
+  const [password,          setPassword]           = useState('')
+  const [error,             setError]              = useState('')
+  const [devices,           setDevices]            = useState([])
+  const [notifications,     setNotifications]      = useState([])
+  const [showNotifPanel,    setShowNotifPanel]      = useState(false)
+  const [modalOpen,         setModalOpen]           = useState(false)
+  const [editModalOpen,     setEditModalOpen]       = useState(false)
+  const [currentDevice,     setCurrentDevice]       = useState(null)
+  const [newCustomerName,   setNewCustomerName]     = useState('')
+  const [modalTitle,        setModalTitle]          = useState('')
+  const [modalDesc,         setModalDesc]           = useState('')
+  const [manualCode,        setManualCode]          = useState('------')
+  const [qrSrc,             setQrSrc]              = useState('')
+  const [hardwareIdParam,   setHardwareIdParam]     = useState('')
+  const [registerModalOpen, setRegisterModalOpen]   = useState(false)
+  const [quotaDevice,       setQuotaDevice]         = useState(null)
+  const [firstInstallModal, setFirstInstallModal]   = useState(false)
+  const [fiDevice,          setFiDevice]            = useState(null)
+  const [fiTests,           setFiTests]             = useState({})
+  const [fiGroup,           setFiGroup]             = useState('')
+  const [fiGroupQty,        setFiGroupQty]          = useState(100)
+  const [activeTab,         setActiveTab]           = useState('devices') // devices | activity
+
+  // ── fetch helpers ────────────────────────────────────────────────────────────
+  const fetchDevices = useCallback(async () => {
     try {
       const res = await fetch('/api/devices')
-      if (res.ok) {
-        const data = await res.json()
-        setDevices(data)
-      } else {
-        setDevices(mockData) // Fallback to mock data
+      const data = res.ok ? await res.json() : MOCK
+      setDevices(data)
+      buildNotifications(data)
+    } catch { setDevices(MOCK); buildNotifications(MOCK) }
+  }, [])
+
+  const buildNotifications = (devList) => {
+    const notifs = []
+    devList.forEach(d => {
+      const h = hoursAgo(d.lastSeen || d.last_seen)
+      if (h > 48) {
+        notifs.push({
+          id: d.id,
+          type: 'offline',
+          message: `${d.customer} — منقطع منذ ${Math.floor(h)}h`,
+          device: d
+        })
+        // Persist to server (fire-and-forget; server deduplicates within 24h)
+        fetch('/api/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create',
+            hardware_id: d.id,
+            machine_name: d.customer,
+            type: 'offline_48h',
+            message: `${d.customer} — منقطع منذ ${Math.floor(h)} ساعة`
+          })
+        }).catch(() => {})
       }
-    } catch (err) {
-      setDevices(mockData) // Fallback to mock data
-    }
+    })
+    setNotifications(notifs)
   }
 
+  useEffect(() => {
+    const logged = localStorage.getItem('isLoggedIn') === 'true'
+    setIsLoggedIn(logged)
+    if (logged) fetchDevices()
+
+    const params = new URLSearchParams(window.location.search)
+    const hwId = params.get('hardware_id')
+    if (hwId) { setHardwareIdParam(hwId); setRegisterModalOpen(true) }
+  }, [fetchDevices])
+
+  // Auto-refresh every 2 minutes
+  useEffect(() => {
+    if (!isLoggedIn) return
+    const t = setInterval(fetchDevices, 120000)
+    return () => clearInterval(t)
+  }, [isLoggedIn, fetchDevices])
+
+  // ── login / logout ────────────────────────────────────────────────────────────
   const handleLogin = async () => {
     try {
       const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       })
       const data = await res.json()
       if (data.success) {
-        localStorage.setItem("isLoggedIn", "true")
-        setIsLoggedIn(true)
-        setError('')
-        fetchDevices()
-      } else {
-        setError(data.error || 'بيانات الدخول غير صحيحة!')
-      }
-    } catch (err) {
-      setError('حدث خطأ أثناء الاتصال بالسيرفر')
-    }
+        localStorage.setItem('isLoggedIn', 'true')
+        setIsLoggedIn(true); setError(''); fetchDevices()
+      } else { setError(data.error || 'بيانات الدخول غير صحيحة!') }
+    } catch { setError('حدث خطأ أثناء الاتصال بالسيرفر') }
   }
 
-  const handleLogout = () => {
-    localStorage.setItem("isLoggedIn", "false")
-    setIsLoggedIn(false)
-  }
+  const handleLogout = () => { localStorage.setItem('isLoggedIn', 'false'); setIsLoggedIn(false) }
 
-  const handleRegisterDevice = async () => {
-    if (!newCustomerName) {
-      alert('يرجى إدخال اسم العميل!')
-      return
-    }
-
-    try {
-      const res = await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hardwareId: hardwareIdParam,
-          machineName: newCustomerName
-        })
-      })
-
-      if (res.ok) {
-        alert('تم تسجيل الجهاز بنجاح!')
-        setRegisterModalOpen(false)
-        fetchDevices() // تحديث القائمة
-      } else {
-        const data = await res.json()
-        alert('فشل التسجيل: ' + data.error)
-      }
-    } catch (err) {
-      alert('حدث خطأ أثناء الاتصال بالسيرفر')
-    }
-  }
-
-  const renderRegisterModal = () => (
-    <div className={`modal-overlay ${registerModalOpen ? 'active' : ''}`} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, opacity: registerModalOpen ? 1 : 0, visibility: registerModalOpen ? 'visible' : 'hidden', transition: 'all 0.3s ease' }}>
-      <div className="modal-content glass" style={{ width: '90%', maxWidth: '400px', padding: '30px', textAlign: 'center', transform: registerModalOpen ? 'scale(1)' : 'scale(0.8)', transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
-        <div className="modal-title" style={{ fontSize: '20px', fontWeight: '700', marginBottom: '20px', color: 'var(--primary)' }}>تسجيل جهاز جديد</div>
-        
-        <div className="form-group" style={{ marginBottom: '20px', textAlign: 'right' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>معرف العتاد (Hardware ID)</label>
-          <input type="text" value={hardwareIdParam} onChange={(e) => setHardwareIdParam(e.target.value)} style={{ width: '100%', padding: '12px 16px', background: 'rgba(0, 0, 0, 0.2)', border: '1px solid var(--card-border)', borderRadius: '8px', color: 'white', fontSize: '16px', textAlign: 'right' }} placeholder="مثلاً: GENO-TEST-1234" disabled={!!new URLSearchParams(window.location.search).get('hardware_id')} />
-        </div>
-        
-        <div className="form-group" style={{ marginBottom: '20px', textAlign: 'right' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>اسم العميل / المختبر</label>
-          <input type="text" value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} style={{ width: '100%', padding: '12px 16px', background: 'rgba(0, 0, 0, 0.2)', border: '1px solid var(--card-border)', borderRadius: '8px', color: 'white', fontSize: '16px', textAlign: 'right' }} placeholder="مثلاً: مختبر الأمل" />
-        </div>
-        
-        <button className="btn-primary" onClick={handleRegisterDevice} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #00f2fe 0%, #4facfe 100%)', border: 'none', borderRadius: '8px', color: '#0b0f19', fontSize: '16px', fontWeight: '700', cursor: 'pointer' }}>تسجيل الجهاز</button>
-        
-        <button className="close-modal" onClick={() => setRegisterModalOpen(false)} style={{ marginTop: '10px', background: 'transparent', border: '1px solid var(--card-border)', color: 'var(--text-muted)', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', width: '100%' }}>إلغاء</button>
-      </div>
-    </div>
-  )
-
+  // ── QR generation ─────────────────────────────────────────────────────────────
   const generateQR = async (type, deviceId, customerName) => {
     const randomCode = Math.floor(1000000000 + Math.random() * 9000000000)
     setManualCode(randomCode.toString())
-
-    let dataToEncode = ""
-    let title = ""
-    let desc = ""
-
-    if (type === 'unlock') {
-      title = `🔑 فك حجب جهاز: ${deviceId}`
-      desc = `هذا الرمز مخصص لفتح حجب النظام في ${customerName} لمدة 30 دقيقة.`
-      dataToEncode = JSON.stringify({
-        testId: "UNLOCK",
-        testName: "Unlock System",
-        quantity: 1,
-        deviceId: deviceId,
-        expiry: new Date(new Date().getTime() + 30 * 60000).toISOString()
-      })
-    } else {
-      title = `🧪 إضافة فحص لجهاز: ${deviceId}`
-      desc = `هذا الرمز مخصص لشحن رصيد فحوصات في ${customerName}.`
-      dataToEncode = JSON.stringify({
-        testId: "TEST-789",
-        testName: "CBC-Full",
-        quantity: 100,
-        deviceId: deviceId,
-        expiry: "2027-12-31"
-      })
-    }
-
-    setModalTitle(title)
-    setModalDesc(desc)
-
-    const encodedData = encodeURIComponent(dataToEncode)
-    setQrSrc(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodedData}&bgcolor=ffffff`)
+    const title = type === 'unlock'
+      ? `🔑 فك حجب جهاز: ${deviceId}`
+      : `🧪 إضافة فحص لجهاز: ${deviceId}`
+    const desc = type === 'unlock'
+      ? `هذا الرمز مخصص لفتح حجب النظام في ${customerName} لمدة 30 دقيقة.`
+      : `شحن رصيد فحوصات في ${customerName}.`
+    const dataToEncode = JSON.stringify({
+      testId: type === 'unlock' ? 'UNLOCK' : 'TEST-789',
+      quantity: type === 'unlock' ? 1 : 100, deviceId,
+      expiry: type === 'unlock'
+        ? new Date(Date.now() + 30 * 60000).toISOString()
+        : '2027-12-31'
+    })
+    setModalTitle(title); setModalDesc(desc)
+    setQrSrc(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(dataToEncode)}&bgcolor=ffffff`)
     setModalOpen(true)
-
-    // إرسال الكود للـ DB السحابية ليتم قبوله عند التحقق
     try {
       await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          qrHash: randomCode.toString(), // للتبسيط نستخدم الكود اليدوي كـ Hash أو الـ QR بالكامل
-          testId: type === 'unlock' ? "UNLOCK" : "TEST-789",
-          quantity: type === 'unlock' ? 0 : 100,
-          deviceId: deviceId
-        })
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qrHash: randomCode.toString(), testId: type === 'unlock' ? 'UNLOCK' : 'TEST-789', quantity: type === 'unlock' ? 0 : 100, deviceId })
       })
-    } catch (err) {
-      console.error("Failed to register QR in cloud", err)
-    }
+    } catch {}
   }
 
   const handlePrint = () => {
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Print QR Only</title>
-          <style>
-            body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-            img { width: 300px; height: 300px; }
-          </style>
-        </head>
-        <body>
-          <img src="${qrSrc}" alt="QR Code" onload="window.print();window.close();" />
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+    const w = window.open('', '_blank')
+    w.document.write(`<html><head><title>QR</title><style>body{display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}img{width:300px;height:300px}</style></head><body><img src="${qrSrc}" onload="window.print();window.close();"/></body></html>`)
+    w.document.close()
   }
 
-  const handleCopyLink = (hardwareId) => {
-    const link = `${window.location.origin}/portal?id=${hardwareId}`;
-    navigator.clipboard.writeText(link);
-    alert('تم نسخ الرابط بنجاح!');
+  // ── device CRUD ───────────────────────────────────────────────────────────────
+  const handleRegisterDevice = async () => {
+    if (!newCustomerName) { alert('يرجى إدخال اسم العميل!'); return }
+    try {
+      const res = await fetch('/api/register', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hardwareId: hardwareIdParam, machineName: newCustomerName })
+      })
+      if (res.ok) { alert('تم تسجيل الجهاز بنجاح!'); setRegisterModalOpen(false); fetchDevices() }
+      else { const d = await res.json(); alert('فشل: ' + d.error) }
+    } catch { alert('حدث خطأ') }
   }
 
-  const handleEdit = (device) => {
-    setCurrentDevice(device)
-    setNewCustomerName(device.customer)
-    setEditModalOpen(true)
-  }
+  const handleEdit = (device) => { setCurrentDevice(device); setNewCustomerName(device.customer); setEditModalOpen(true) }
 
   const handleSaveEdit = async () => {
     try {
       const res = await fetch('/api/update_device', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hardwareId: currentDevice.id, customerName: newCustomerName })
       })
       const data = await res.json()
-      if (data.success) {
-        setEditModalOpen(false)
-        fetchDevices()
-        alert('تم تعديل البيانات بنجاح!')
-      }
-    } catch (err) {
-      alert('حدث خطأ أثناء التعديل')
-    }
+      if (data.success) { setEditModalOpen(false); fetchDevices(); alert('تم التعديل بنجاح!') }
+    } catch { alert('حدث خطأ أثناء التعديل') }
   }
 
   const handleDelete = async (hardwareId) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا العميل نهائياً؟')) return;
+    if (!window.confirm('هل أنت متأكد من الحذف النهائي؟')) return
     try {
       const res = await fetch('/api/delete_device', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hardwareId })
       })
       const data = await res.json()
-      if (data.success) {
-        fetchDevices()
-        alert('تم حذف العميل بنجاح!')
-      }
-    } catch (err) {
-      alert('حدث خطأ أثناء الحذف')
-    }
+      if (data.success) { fetchDevices(); alert('تم الحذف!') }
+    } catch { alert('حدث خطأ أثناء الحذف') }
   }
 
   const handleResetHardwareLock = async (hardwareId, customerName) => {
-    if (!window.confirm(`هل أنت متأكد من إعادة تعيين قفل الععتاد لـ ${customerName}؟\nسيؤدي هذا إلى فك الارتباط وبصمة الـ PC الحالي تلقائياً والسماح بربط الحاسوب/الجهاز الجديد عند أول اتصال.`)) return;
+    if (!window.confirm(`فك قفل العتاد لـ ${customerName}؟`)) return
     try {
       const res = await fetch('/api/update_device', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hardwareId, resetHardwareLock: true })
       })
       const data = await res.json()
-      if (data.success) {
-        alert('تم فك قفل العتاد بنجاح! جاهز للاعتمد التلقائي الجديد.')
-        fetchDevices()
-      } else {
-        alert('فشل إعادة تعيين القفل: ' + data.error)
-      }
-    } catch (err) {
-      alert('حدث خطأ أثناء الاتصال بالسيرفر')
-    }
+      if (data.success) { alert('تم فك قفل العتاد!'); fetchDevices() }
+      else alert('فشل: ' + data.error)
+    } catch { alert('خطأ') }
   }
 
+  // ── First Install: No-Barcode Activation ──────────────────────────────────────
+  const openFirstInstall = (device) => {
+    setFiDevice(device)
+    const init = {}
+    ALL_TESTS.forEach(t => { init[t] = 0 })
+    setFiTests(init)
+    setFiGroup('')
+    setFiGroupQty(100)
+    setFirstInstallModal(true)
+  }
+
+  const applyGroupPreset = () => {
+    if (!fiGroup || !TEST_GROUPS[fiGroup]) return
+    const updated = { ...fiTests }
+    TEST_GROUPS[fiGroup].forEach(t => { updated[t] = fiGroupQty })
+    setFiTests(updated)
+  }
+
+  const handleFirstInstallSave = async () => {
+    const entries = Object.entries(fiTests).filter(([, qty]) => qty > 0)
+    if (entries.length === 0) { alert('أدخل كمية لفحص واحد على الأقل.'); return }
+    try {
+      for (const [testCode, qty] of entries) {
+        await fetch('/api/test_quotas', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'upsert', deviceId: fiDevice.id, testCode, testName: testCode, totalQuota: qty, alertThreshold: 20 })
+        })
+      }
+      alert(`✔ تم تفعيل ${entries.length} فحص لـ ${fiDevice.customer} بدون باركود!`)
+      setFirstInstallModal(false); fetchDevices()
+    } catch { alert('حدث خطأ أثناء الحفظ') }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LOGIN SCREEN
+  // ─────────────────────────────────────────────────────────────────────────────
   if (!isLoggedIn) {
     return (
-      <>
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-          <div id="login-container" className="glass" style={{ width: '100%', maxWidth: '400px', padding: '40px', textAlign: 'center' }}>
-            <div className="logo" style={{ fontSize: '28px', fontWeight: '900', color: 'var(--primary)', textShadow: '0 0 20px var(--primary-glow)', marginBottom: '10px' }}>GENOTEK GUARD</div>
-            <div className="subtitle" style={{ color: 'var(--text-muted)', fontSize: '14px', marginBottom: '30px' }}>نظام إدارة صلاحيات الأجهزة السحابي</div>
-            
-            <div className="form-group" style={{ marginBottom: '20px', textAlign: 'right' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>اسم المستخدم</label>
-              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} style={{ width: '100%', padding: '12px 16px', background: 'rgba(0, 0, 0, 0.2)', border: '1px solid var(--card-border)', borderRadius: '8px', color: 'white', fontSize: '16px', textAlign: 'right' }} />
+      <div style={{ display:'flex', justifyContent:'center', alignItems:'center', minHeight:'100vh', background:'linear-gradient(135deg, #0b0f19 0%, #131929 100%)' }}>
+        <div style={{ width:'100%', maxWidth:'400px', padding:'40px', background:'rgba(255,255,255,0.04)', borderRadius:'16px', border:'1px solid rgba(255,255,255,0.08)', backdropFilter:'blur(12px)', textAlign:'center' }}>
+          <div style={{ fontSize:'26px', fontWeight:'900', color:'#4facfe', marginBottom:'6px', letterSpacing:'2px' }}>GENOTEK GUARD</div>
+          <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'13px', marginBottom:'32px' }}>نظام إدارة صلاحيات الأجهزة السحابي</div>
+
+          {['username','password'].map(field => (
+            <div key={field} style={{ marginBottom:'16px', textAlign:'right' }}>
+              <label style={{ display:'block', marginBottom:'6px', fontSize:'13px', color:'rgba(255,255,255,0.5)' }}>
+                {field === 'username' ? 'اسم المستخدم' : 'كلمة المرور'}
+              </label>
+              <input type={field === 'password' ? 'password' : 'text'}
+                value={field === 'username' ? username : password}
+                onChange={e => field === 'username' ? setUsername(e.target.value) : setPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                style={{ width:'100%', padding:'12px 14px', background:'rgba(0,0,0,0.3)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'8px', color:'white', fontSize:'15px', boxSizing:'border-box', textAlign:'right' }}
+              />
             </div>
-            
-            <div className="form-group" style={{ marginBottom: '20px', textAlign: 'right' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>كلمة المرور</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ width: '100%', padding: '12px 16px', background: 'rgba(0, 0, 0, 0.2)', border: '1px solid var(--card-border)', borderRadius: '8px', color: 'white', fontSize: '16px', textAlign: 'right' }} />
-            </div>
-            
-            <button className="btn-primary" onClick={handleLogin} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #00f2fe 0%, #4facfe 100%)', border: 'none', borderRadius: '8px', color: '#0b0f19', fontSize: '16px', fontWeight: '700', cursor: 'pointer' }}>تسجيل الدخول</button>
-            
-            {error && <div className="error-msg" style={{ color: 'var(--danger)', fontSize: '14px', marginTop: '15px', background: 'rgba(239, 68, 68, 0.1)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>{error}</div>}
+          ))}
+
+          <button onClick={handleLogin} style={{ width:'100%', padding:'14px', background:'linear-gradient(135deg,#00f2fe,#4facfe)', border:'none', borderRadius:'8px', color:'#0b0f19', fontSize:'16px', fontWeight:'700', cursor:'pointer', marginTop:'8px' }}>
+            تسجيل الدخول
+          </button>
+          {error && <div style={{ color:'#f87171', fontSize:'13px', marginTop:'14px', background:'rgba(239,68,68,0.1)', padding:'10px', borderRadius:'6px', border:'1px solid rgba(239,68,68,0.2)' }}>{error}</div>}
+
+          {/* Contact footer */}
+          <div style={{ marginTop:'28px', paddingTop:'16px', borderTop:'1px solid rgba(255,255,255,0.06)', color:'rgba(255,255,255,0.25)', fontSize:'11px' }}>
+            Contact Service Department
           </div>
         </div>
-        {renderRegisterModal()}
-      </>
+
+        {registerModalOpen && <RegisterModal
+          hardwareIdParam={hardwareIdParam} setHardwareIdParam={setHardwareIdParam}
+          newCustomerName={newCustomerName} setNewCustomerName={setNewCustomerName}
+          onRegister={handleRegisterDevice} onClose={() => setRegisterModalOpen(false)} />}
+      </div>
     )
   }
 
-  return (
-    <div style={{ padding: '20px', width: '100%', maxWidth: '1200px', margin: '0 auto' }}>
-      <div id="dashboard-container" className="glass" style={{ padding: '30px', display: 'flex', flexDirection: 'column', gap: '30px' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--card-border)', paddingBottom: '20px' }}>
-          <div>
-            <div className="logo" style={{ fontSize: '24px', fontWeight: '900', color: 'var(--primary)', textShadow: '0 0 20px var(--primary-glow)' }}>GENOTEK DASHBOARD</div>
-            <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>مرحباً بك في نظام الإدارة المركزي</div>
-          </div>
-          
-          <div className="user-info" style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <div className="avatar" style={{ width: '40px', height: '40px', background: 'var(--primary)', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#0b0f19', fontWeight: 'bold' }}>A</div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontWeight: '600' }}>المهندس (AFLO)</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>مسؤول النظام</div>
-            </div>
-            <button onClick={() => { setRegisterModalOpen(true); if (!hardwareIdParam) setHardwareIdParam("GENO-" + Math.random().toString(36).substring(2, 10).toUpperCase()); }} style={{ background: 'var(--primary)', border: 'none', color: '#0b0f19', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>تسجيل جهاز</button>
-            <button className="logout-btn" onClick={handleLogout} style={{ background: 'transparent', border: '1px solid var(--card-border)', color: 'var(--text-muted)', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}>تسجيل الخروج</button>
-          </div>
-        </header>
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DASHBOARD
+  // ─────────────────────────────────────────────────────────────────────────────
+  const onlineCount  = devices.filter(d => d.status === 'online' || d.status === 'Connected').length
+  const offlineCount = devices.filter(d => d.status !== 'online' && d.status !== 'Connected').length
+  const alertCount   = notifications.length
 
-        {/* كروت الإحصائيات */}
-        <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '20px' }}>
-          <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
-            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--primary)' }}>{devices.length}</div>
-            <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>إجمالي العملاء</div>
-          </div>
-          <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
-            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--primary)' }}>{devices.length}</div>
-            <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>الأجهزة الإجمالية</div>
-          </div>
-          <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
-            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--success)' }}>{devices.filter(d => d.status === 'online').length}</div>
-            <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>متصل الآن</div>
-          </div>
-          <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center' }}>
-            <div className="stat-value" style={{ fontSize: '32px', fontWeight: '900', color: 'var(--danger)' }}>{devices.filter(d => d.status === 'offline').length}</div>
-            <div className="stat-label" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>منقطع (أكثر من 72 ساعة)</div>
-          </div>
-          <div className="stat-card glass" style={{ padding: '20px', textAlign: 'center', cursor: 'pointer', border: '1px solid rgba(245,158,11,0.25)' }} onClick={() => alert('انقر على زر 📊 الفحوصات لأي جهاز لإدارة رصيده')}>
-            <div style={{ fontSize: '28px', marginBottom: '4px' }}>🧪</div>
-            <div className="stat-label" style={{ color: '#f59e0b', fontSize: '13px', fontWeight: '700' }}>إدارة حصص الفحوصات</div>
-            <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>اضغط 📊 على أي جهاز</div>
-          </div>
+  return (
+    <div style={{ minHeight:'100vh', background:'linear-gradient(135deg,#0b0f19 0%,#131929 100%)', padding:'24px', fontFamily:'Segoe UI, Arial, sans-serif', direction:'rtl' }}>
+
+      {/* ── Header ── */}
+      <header style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px', background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'12px', padding:'16px 24px' }}>
+        <div>
+          <div style={{ fontSize:'20px', fontWeight:'900', color:'#4facfe', letterSpacing:'1px' }}>GENOTEK DASHBOARD</div>
+          <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'12px', marginTop:'2px' }}>مرحباً — نظام إدارة الأجهزة المركزي</div>
         </div>
 
-        {/* جدول الأجهزة */}
-        <div className="table-container glass" style={{ width: '100%', overflowX: 'auto', padding: '20px', background: 'rgba(0,0,0,0.2)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
+          {/* Notification Bell */}
+          <div style={{ position:'relative', cursor:'pointer' }} onClick={() => setShowNotifPanel(v => !v)}>
+            <span style={{ fontSize:'22px' }}>🔔</span>
+            {alertCount > 0 && (
+              <span style={{ position:'absolute', top:'-6px', right:'-6px', background:'#ef4444', color:'white', borderRadius:'50%', width:'18px', height:'18px', fontSize:'10px', fontWeight:'700', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                {alertCount}
+              </span>
+            )}
+          </div>
+
+          <button onClick={() => { setRegisterModalOpen(true); if (!hardwareIdParam) setHardwareIdParam('GENO-' + Math.random().toString(36).substring(2,10).toUpperCase()) }}
+            style={{ background:'#4facfe', border:'none', color:'#0b0f19', padding:'8px 16px', borderRadius:'6px', cursor:'pointer', fontWeight:'700', fontSize:'13px' }}>
+            + تسجيل جهاز
+          </button>
+          <button onClick={handleLogout} style={{ background:'transparent', border:'1px solid rgba(255,255,255,0.15)', color:'rgba(255,255,255,0.5)', padding:'8px 14px', borderRadius:'6px', cursor:'pointer', fontSize:'13px' }}>
+            خروج
+          </button>
+        </div>
+      </header>
+
+      {/* ── Notification Panel ── */}
+      {showNotifPanel && (
+        <div style={{ marginBottom:'20px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'12px', padding:'16px 20px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
+            <div style={{ fontWeight:'700', color:'#f87171', fontSize:'14px' }}>
+              ⚠ إنذارات الانقطاع (أكثر من 48 ساعة) — {alertCount} جهاز
+            </div>
+            {alertCount > 0 && (
+              <button onClick={() => {
+                setNotifications([])
+                setShowNotifPanel(false)
+                fetch('/api/notify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'mark_read' }) }).catch(()=>{})
+              }} style={{ padding:'4px 10px', background:'rgba(100,200,100,0.1)', color:'#34d399', border:'1px solid rgba(52,211,153,0.2)', borderRadius:'4px', cursor:'pointer', fontSize:'12px' }}>
+                ✔ تم الاطلاع على الجميع
+              </button>
+            )}
+          </div>
+          {alertCount === 0
+            ? <div style={{ color:'#34d399', fontSize:'13px' }}>✔ جميع الأجهزة متصلة بشكل طبيعي</div>
+            : notifications.map((n, i) => (
+                <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', background:'rgba(239,68,68,0.1)', borderRadius:'8px', marginBottom:'6px', border:'1px solid rgba(239,68,68,0.2)' }}>
+                  <span style={{ color:'#fca5a5', fontSize:'13px' }}>📴 {n.message}</span>
+                  <div style={{ display:'flex', gap:'8px' }}>
+                    <button onClick={() => generateQR('unlock', n.device.id, n.device.customer)} style={{ padding:'4px 10px', background:'rgba(0,242,254,0.1)', color:'#00f2fe', border:'1px solid rgba(0,242,254,0.2)', borderRadius:'4px', cursor:'pointer', fontSize:'12px' }}>فك الحجب</button>
+                    <button onClick={() => { setQuotaDevice(n.device); setShowNotifPanel(false) }} style={{ padding:'4px 10px', background:'rgba(16,185,129,0.1)', color:'#34d399', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'4px', cursor:'pointer', fontSize:'12px' }}>الفحوصات</button>
+                  </div>
+                </div>
+              ))
+          }
+        </div>
+      )}
+
+      {/* ── Stats ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:'16px', marginBottom:'24px' }}>
+        {[
+          { label:'إجمالي العملاء',    value: devices.length, color:'#4facfe' },
+          { label:'متصل الآن',          value: onlineCount,    color:'#34d399' },
+          { label:'منقطع (>48h)',        value: offlineCount,   color:'#f87171' },
+          { label:'إنذارات نشطة',       value: alertCount,     color:'#f59e0b',
+            onClick: () => setShowNotifPanel(v => !v), extra: alertCount > 0 ? '⚠' : '✔' },
+        ].map((s, i) => (
+          <div key={i} onClick={s.onClick} style={{ padding:'18px', background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'10px', textAlign:'center', cursor: s.onClick ? 'pointer' : 'default', transition:'border-color 0.2s' }}>
+            <div style={{ fontSize:'28px', fontWeight:'900', color: s.color }}>{s.extra || s.value}</div>
+            {s.extra && <div style={{ fontSize:'20px', fontWeight:'700', color: s.color }}>{s.value}</div>}
+            <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'12px', marginTop:'4px' }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Tab bar ── */}
+      <div style={{ display:'flex', gap:'4px', marginBottom:'16px' }}>
+        {[['devices','الأجهزة والعملاء'],['activity','سجل النشاط']].map(([id, label]) => (
+          <button key={id} onClick={() => setActiveTab(id)} style={{ padding:'8px 20px', background: activeTab===id ? '#4facfe' : 'rgba(255,255,255,0.04)', color: activeTab===id ? '#0b0f19' : 'rgba(255,255,255,0.6)', border:`1px solid ${activeTab===id ? '#4facfe' : 'rgba(255,255,255,0.08)'}`, borderRadius:'8px', cursor:'pointer', fontWeight:'700', fontSize:'13px' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Devices Table ── */}
+      {activeTab === 'devices' && (
+        <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'12px', overflow:'hidden' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', textAlign:'right' }}>
             <thead>
               <tr>
-                <th style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '14px', borderBottom: '1px solid var(--card-border)' }}>اسم العميل</th>
-                <th style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '14px', borderBottom: '1px solid var(--card-border)' }}>اسم الجهاز</th>
-                <th style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '14px', borderBottom: '1px solid var(--card-border)' }}>الحالة</th>
-                <th style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '14px', borderBottom: '1px solid var(--card-border)' }}>آخر اتصال</th>
-                <th style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '14px', borderBottom: '1px solid var(--card-border)' }}>العمليات</th>
+                {['اسم العميل','الجهاز','الحالة','آخر اتصال','العمليات'].map(h => (
+                  <th key={h} style={{ padding:'14px 16px', color:'rgba(255,255,255,0.4)', fontSize:'12px', borderBottom:'1px solid rgba(255,255,255,0.06)', background:'rgba(255,255,255,0.02)', fontWeight:'600' }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {devices.map((item, index) => {
-                const isBlocked = item.status === "blocked"
-                const isOfflineRed = item.lastSeen.includes("أيام") || item.status === "offline" || isBlocked
-                
-                let statusText = "منقطع"
-                if (isBlocked) {
-                  statusText = "محظور (تلاعب)"
-                } else if (item.status === "online" || item.status === "Connected") {
-                  statusText = "متصل"
-                }
+              {devices.map((item, idx) => {
+                const h = hoursAgo(item.lastSeen || item.last_seen)
+                const isOnline  = item.status === 'online' || item.status === 'Connected'
+                const isBlocked = item.status === 'blocked'
+                const isAlerted = h > 48
 
                 return (
-                  <tr key={index} style={{ borderBottom: '1px solid var(--card-border)' }}>
-                    <td style={{ padding: '16px', fontWeight: '600' }}>
-                      <div>{item.customer}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'right' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>💻 بصمة الحاسب: <code style={{ color: '#00f2fe', background: 'rgba(0,242,254,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', direction: 'ltr' }}>{item.authorizedMachineHash}</code></span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🧪 سيريال الكيمياء: <code style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', direction: 'ltr' }}>{item.authorizedAnalyzerSerial}</code></span>
-                        {item.blocked_tests && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🚫 الفحوصات المحجوبة: <code style={{ color: '#f87171', background: 'rgba(239,68,68,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{item.blocked_tests}</code></span>
-                        )}
-                        {item.blocked_pages && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🖥️ الواجهات المحجوبة: <code style={{ color: '#fb7185', background: 'rgba(244,63,94,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{item.blocked_pages}</code></span>
-                        )}
+                  <tr key={idx} style={{ borderBottom:'1px solid rgba(255,255,255,0.04)', background: isAlerted ? 'rgba(239,68,68,0.04)' : 'transparent' }}>
+                    {/* Customer */}
+                    <td style={{ padding:'14px 16px' }}>
+                      <div style={{ fontWeight:'600', color:'white', fontSize:'14px' }}>{item.customer}</div>
+                      <div style={{ fontSize:'10px', color:'rgba(255,255,255,0.3)', marginTop:'4px' }}>
+                        💻 {item.authorizedMachineHash || '—'}
+                        {item.authorizedAnalyzerSerial && <span style={{ marginRight:'10px' }}>🧪 {item.authorizedAnalyzerSerial}</span>}
                       </div>
+                      {item.blocked_tests && <div style={{ fontSize:'10px', color:'#f87171', marginTop:'2px' }}>🚫 {item.blocked_tests}</div>}
                     </td>
-                    <td style={{ padding: '16px' }}><code style={{ color: 'var(--primary)' }}>{item.device}</code> ({item.id})</td>
-                    <td style={{ padding: '16px' }}>
+
+                    {/* Device */}
+                    <td style={{ padding:'14px 16px', color:'#4facfe', fontSize:'13px' }}>
+                      <code>{item.device}</code>
+                      <div style={{ fontSize:'10px', color:'rgba(255,255,255,0.3)', marginTop:'2px' }}>{item.id}</div>
+                    </td>
+
+                    {/* Status */}
+                    <td style={{ padding:'14px 16px' }}>
                       <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        padding: '4px 12px',
-                        borderRadius: '20px',
-                        fontSize: '12px',
-                        fontWeight: '600',
-                        background: isBlocked ? 'rgba(239, 68, 68, 0.15)' : (statusText === 'متصل' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(156, 163, 175, 0.15)'),
-                        color: isBlocked ? '#f87171' : (statusText === 'متصل' ? '#34d399' : '#9ca3af'),
-                        border: `1px solid ${isBlocked ? 'rgba(239, 68, 68, 0.3)' : (statusText === 'متصل' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(156, 163, 175, 0.3)')}`
+                        display:'inline-flex', alignItems:'center', gap:'6px',
+                        padding:'3px 10px', borderRadius:'20px', fontSize:'12px', fontWeight:'600',
+                        background: isBlocked ? 'rgba(239,68,68,0.15)' : isOnline ? 'rgba(16,185,129,0.15)' : isAlerted ? 'rgba(239,68,68,0.12)' : 'rgba(156,163,175,0.12)',
+                        color: isBlocked ? '#f87171' : isOnline ? '#34d399' : isAlerted ? '#fca5a5' : '#9ca3af',
+                        border: `1px solid ${isBlocked ? 'rgba(239,68,68,0.3)' : isOnline ? 'rgba(16,185,129,0.3)' : isAlerted ? 'rgba(239,68,68,0.25)' : 'rgba(156,163,175,0.25)'}`
                       }}>
-                        <span style={{
-                          width: '8px',
-                          height: '8px',
-                          borderRadius: '50%',
-                          display: 'inline-block',
-                          background: isBlocked ? '#ef4444' : (statusText === 'متصل' ? '#10b981' : '#9ca3af'),
-                          boxShadow: isBlocked ? '0 0 8px #ef4444' : (statusText === 'متصل' ? '0 0 8px #10b981' : 'none')
-                        }}></span>
-                        {statusText}
+                        <span style={{ width:'6px', height:'6px', borderRadius:'50%', background: isOnline ? '#10b981' : isAlerted ? '#ef4444' : '#6b7280', boxShadow: isOnline ? '0 0 6px #10b981' : isAlerted ? '0 0 6px #ef4444' : 'none' }}></span>
+                        {isBlocked ? 'محظور' : isOnline ? 'متصل' : isAlerted ? 'منقطع ⚠' : 'غير متصل'}
                       </span>
                     </td>
-                    <td style={{ padding: '16px', color: isBlocked ? 'var(--danger)' : (isOfflineRed ? 'var(--danger)' : 'var(--text-muted)') }}>
-                      <div>{item.lastSeen}</div>
-                      {item.disconnectDuration && (
-                        <div style={{ fontSize: '11px', fontWeight: 'bold', marginTop: '4px', padding: '2px 6px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px', display: 'inline-block' }}>
-                          {item.disconnectDuration}
-                        </div>
-                      )}
+
+                    {/* Last seen */}
+                    <td style={{ padding:'14px 16px', color: isAlerted ? '#fca5a5' : 'rgba(255,255,255,0.4)', fontSize:'13px' }}>
+                      {formatDuration(item.lastSeen || item.last_seen)}
+                      {isAlerted && <div style={{ fontSize:'10px', color:'#f87171', marginTop:'2px', fontWeight:'700' }}>تجاوز 48h!</div>}
                     </td>
-                    <td style={{ padding: '16px' }}>
-                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                        <button className="action-btn btn-unlock" onClick={() => generateQR('unlock', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 255, 255, 0.1)', color: 'var(--primary)', border: '1px solid rgba(0, 255, 255, 0.2)' }}>🔓 فك الحجب</button>
-                        <button className="action-btn btn-test" onClick={() => generateQR('test', item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 215, 0, 0.1)', color: 'var(--accent)', border: '1px solid rgba(255, 215, 0, 0.2)' }}>🧪 شحن QR</button>
-                        <button className="action-btn btn-quota" onClick={() => setQuotaDevice(item)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' }}>📊 الفحوصات</button>
-                        <button className="action-btn btn-reset-hw" onClick={() => handleResetHardwareLock(item.id, item.customer)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.25)' }}>🔄 فك قفل العتاد</button>
-                        <button className="action-btn btn-copy" onClick={() => handleCopyLink(item.id)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 255, 255, 0.1)', color: 'var(--text)', border: '1px solid rgba(255, 255, 255, 0.2)' }}>🔗 نسخ الرابط</button>
-                        <button className="action-btn btn-edit" onClick={() => handleEdit(item)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(0, 150, 255, 0.1)', color: '#00c3ff', border: '1px solid rgba(0, 150, 255, 0.2)' }}>✏️ تعديل</button>
-                        <button className="action-btn btn-delete" onClick={() => handleDelete(item.id)} style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: 'rgba(255, 0, 0, 0.1)', color: 'var(--danger)', border: '1px solid rgba(255, 0, 0, 0.2)' }}>🗑️ حذف</button>
+
+                    {/* Actions */}
+                    <td style={{ padding:'10px 12px' }}>
+                      <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                        <ActionBtn color="#00f2fe" onClick={() => generateQR('unlock', item.id, item.customer)}>🔓 فك</ActionBtn>
+                        <ActionBtn color="#34d399" onClick={() => openFirstInstall(item)}>✨ أول تنصيب</ActionBtn>
+                        <ActionBtn color="#10b981" onClick={() => setQuotaDevice(item)}>📊 حصص</ActionBtn>
+                        <ActionBtn color="#f59e0b" onClick={() => handleResetHardwareLock(item.id, item.customer)}>🔄 عتاد</ActionBtn>
+                        <ActionBtn color="#00c3ff" onClick={() => handleEdit(item)}>✏️</ActionBtn>
+                        <ActionBtn color="#ef4444" onClick={() => handleDelete(item.id)}>🗑️</ActionBtn>
                       </div>
                     </td>
                   </tr>
@@ -442,56 +467,211 @@ function App() {
               })}
             </tbody>
           </table>
+          {devices.length === 0 && (
+            <div style={{ textAlign:'center', padding:'40px', color:'rgba(255,255,255,0.25)', fontSize:'14px' }}>
+              لا توجد أجهزة مسجلة بعد
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* النافذة المنبثقة للـ QR */}
-      <div className={`modal-overlay ${modalOpen ? 'active' : ''}`} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, opacity: modalOpen ? 1 : 0, visibility: modalOpen ? 'visible' : 'hidden', transition: 'all 0.3s ease' }}>
-        <div className="modal-content glass" style={{ width: '90%', maxWidth: '400px', padding: '30px', textAlign: 'center', transform: modalOpen ? 'scale(1)' : 'scale(0.8)', transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
-          <div className="modal-title" style={{ fontSize: '20px', fontWeight: '700', marginBottom: '20px', color: 'var(--primary)' }}>{modalTitle}</div>
-          
-          <div className="qr-placeholder" style={{ width: '200px', height: '200px', background: 'white', margin: '0 auto 20px auto', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px' }}>
-            {qrSrc && <img src={qrSrc} alt="QR Code" style={{ width: '100%', height: '100%' }} />}
+      {/* ── Activity Tab ── */}
+      {activeTab === 'activity' && (
+        <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'12px', padding:'20px' }}>
+          <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'13px', marginBottom:'12px' }}>
+            سجل النشاط يعرض العمليات المسجلة من الأجهزة عبر LAN. يتطلب تفعيل خاصية machine_activity_log في قاعدة البيانات.
           </div>
-          
-          <div style={{ color: 'var(--text-muted)', fontSize: '14px', marginBottom: '5px' }}>الكود اليدوي البديل:</div>
-          <div className="manual-code" style={{ fontSize: '24px', fontWeight: '900', letterSpacing: '4px', color: 'var(--accent)', marginBottom: '10px', textShadow: '0 0 10px rgba(255, 215, 0, 0.2)' }}>{manualCode}</div>
-          
-          <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{modalDesc}</div>
-          
-          <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'center' }}>
-            <button className="print-btn" onClick={handlePrint} style={{ background: 'var(--primary)', border: 'none', color: '#0b0f19', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>🖨️ طباعة</button>
-            <button className="close-modal" onClick={() => setModalOpen(false)} style={{ background: 'transparent', border: '1px solid var(--card-border)', color: 'var(--text-muted)', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer' }}>إغلاق النافذة</button>
-          </div>
+          <ActivityLog devices={devices} />
         </div>
-      </div>
+      )}
 
-      {/* النافذة المنبثقة للتعديل */}
-      <div className={`modal-overlay \${editModalOpen ? 'active' : ''}`} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, opacity: editModalOpen ? 1 : 0, visibility: editModalOpen ? 'visible' : 'hidden', transition: 'all 0.3s ease' }}>
-        <div className="modal-content glass" style={{ width: '90%', maxWidth: '400px', padding: '30px', textAlign: 'center', transform: editModalOpen ? 'scale(1)' : 'scale(0.8)', transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
-          <div className="modal-title" style={{ fontSize: '20px', fontWeight: '700', marginBottom: '20px', color: 'var(--primary)' }}>تعديل بيانات العميل</div>
-          
-          <div style={{ marginBottom: '20px', textAlign: 'right' }}>
-            <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontSize: '14px' }}>اسم العميل الجديد:</label>
-            <input 
-              type="text" 
-              value={newCustomerName} 
-              onChange={(e) => setNewCustomerName(e.target.value)} 
-              style={{ width: '100%', padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--card-border)', color: 'white', fontSize: '14px' }}
-            />
-          </div>
-          
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-            <button onClick={handleSaveEdit} style={{ background: 'var(--primary)', border: 'none', color: '#0b0f19', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>حفظ التعديلات</button>
-            <button onClick={() => setEditModalOpen(false)} style={{ background: 'transparent', border: '1px solid var(--card-border)', color: 'var(--text-muted)', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer' }}>إلغاء</button>
-          </div>
-        </div>
-      </div>
-
-      {renderRegisterModal()}
+      {/* ── Modals ── */}
+      {modalOpen      && <QrModal title={modalTitle} desc={modalDesc} qrSrc={qrSrc} code={manualCode} onPrint={handlePrint} onClose={() => setModalOpen(false)} />}
+      {editModalOpen  && <EditModal customerName={newCustomerName} onChange={setNewCustomerName} onSave={handleSaveEdit} onClose={() => setEditModalOpen(false)} />}
+      {registerModalOpen && <RegisterModal hardwareIdParam={hardwareIdParam} setHardwareIdParam={setHardwareIdParam} newCustomerName={newCustomerName} setNewCustomerName={setNewCustomerName} onRegister={handleRegisterDevice} onClose={() => setRegisterModalOpen(false)} />}
+      {firstInstallModal && fiDevice && (
+        <FirstInstallModal
+          device={fiDevice} tests={fiTests} setTests={setFiTests}
+          group={fiGroup} setGroup={setFiGroup} groupQty={fiGroupQty} setGroupQty={setFiGroupQty}
+          onApplyGroup={applyGroupPreset} onSave={handleFirstInstallSave} onClose={() => setFirstInstallModal(false)} />
+      )}
       {quotaDevice && <QuotaManager device={quotaDevice} onClose={() => setQuotaDevice(null)} />}
     </div>
   )
 }
 
-export default App
+// ─── Small Helpers ────────────────────────────────────────────────────────────
+function ActionBtn({ color, onClick, children }) {
+  return (
+    <button onClick={onClick} style={{ padding:'6px 10px', borderRadius:'6px', fontSize:'12px', fontWeight:'600', cursor:'pointer', background:`rgba(${hexToRgb(color)},0.1)`, color, border:`1px solid rgba(${hexToRgb(color)},0.25)`, whiteSpace:'nowrap' }}>
+      {children}
+    </button>
+  )
+}
+
+function hexToRgb(hex) {
+  const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '255,255,255'
+}
+
+// ─── Activity Log ─────────────────────────────────────────────────────────────
+function ActivityLog({ devices }) {
+  const [logs, setLogs] = useState([])
+  useEffect(() => {
+    fetch('/api/activity_log')
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setLogs(d.logs || []))
+      .catch(() => {
+        // Simulate activity from device heartbeats
+        setLogs(devices.map(d => ({
+          time: d.lastSeen || d.last_seen,
+          device: d.customer,
+          event: 'Heartbeat',
+          data: `Status: ${d.status}`
+        })).filter(l => l.time).sort((a,b) => new Date(b.time) - new Date(a.time)).slice(0, 20))
+      })
+  }, [devices])
+
+  return (
+    <div style={{ fontFamily:'Consolas,monospace', fontSize:'12px', color:'#a3e635', maxHeight:'420px', overflowY:'auto' }}>
+      {logs.length === 0
+        ? <div style={{ color:'rgba(255,255,255,0.3)' }}>لا توجد سجلات بعد...</div>
+        : logs.map((l, i) => (
+            <div key={i} style={{ padding:'4px 0', borderBottom:'1px solid rgba(255,255,255,0.04)' }}>
+              <span style={{ color:'rgba(255,255,255,0.3)' }}>[{new Date(l.time).toLocaleString('ar-IQ')}]</span>
+              {' '}<span style={{ color:'#4facfe' }}>[{l.device}]</span>
+              {' '}<span style={{ color:'#f59e0b' }}>{l.event}:</span>
+              {' '}<span>{l.data}</span>
+            </div>
+          ))
+      }
+    </div>
+  )
+}
+
+// ─── QR Modal ─────────────────────────────────────────────────────────────────
+function QrModal({ title, desc, qrSrc, code, onPrint, onClose }) {
+  return (
+    <Overlay onClick={onClose}>
+      <ModalBox onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize:'18px', fontWeight:'700', color:'#4facfe', marginBottom:'16px' }}>{title}</div>
+        <div style={{ width:'200px', height:'200px', background:'white', margin:'0 auto 16px', borderRadius:'10px', padding:'8px' }}>
+          {qrSrc && <img src={qrSrc} alt="QR" style={{ width:'100%', height:'100%' }} />}
+        </div>
+        <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'12px', marginBottom:'4px' }}>الكود اليدوي:</div>
+        <div style={{ fontSize:'22px', fontWeight:'900', letterSpacing:'4px', color:'#fbbf24', marginBottom:'8px' }}>{code}</div>
+        <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'12px', marginBottom:'16px' }}>{desc}</div>
+        <div style={{ display:'flex', gap:'10px', justifyContent:'center' }}>
+          <ModalBtn bg="#4facfe" color="#0b0f19" onClick={onPrint}>🖨️ طباعة</ModalBtn>
+          <ModalBtn onClick={onClose}>إغلاق</ModalBtn>
+        </div>
+      </ModalBox>
+    </Overlay>
+  )
+}
+
+// ─── Edit Modal ───────────────────────────────────────────────────────────────
+function EditModal({ customerName, onChange, onSave, onClose }) {
+  return (
+    <Overlay onClick={onClose}>
+      <ModalBox onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize:'18px', fontWeight:'700', color:'#4facfe', marginBottom:'16px' }}>تعديل بيانات العميل</div>
+        <label style={{ display:'block', marginBottom:'6px', color:'rgba(255,255,255,0.4)', fontSize:'13px' }}>اسم العميل الجديد:</label>
+        <input value={customerName} onChange={e => onChange(e.target.value)} style={{ width:'100%', padding:'10px 12px', background:'rgba(0,0,0,0.3)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'8px', color:'white', fontSize:'14px', marginBottom:'16px', boxSizing:'border-box' }} />
+        <div style={{ display:'flex', gap:'10px', justifyContent:'center' }}>
+          <ModalBtn bg="#4facfe" color="#0b0f19" onClick={onSave}>حفظ</ModalBtn>
+          <ModalBtn onClick={onClose}>إلغاء</ModalBtn>
+        </div>
+      </ModalBox>
+    </Overlay>
+  )
+}
+
+// ─── Register Modal ───────────────────────────────────────────────────────────
+function RegisterModal({ hardwareIdParam, setHardwareIdParam, newCustomerName, setNewCustomerName, onRegister, onClose }) {
+  const locked = !!new URLSearchParams(window.location.search).get('hardware_id')
+  return (
+    <Overlay onClick={onClose}>
+      <ModalBox onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize:'18px', fontWeight:'700', color:'#4facfe', marginBottom:'20px' }}>تسجيل جهاز جديد</div>
+        <label style={{ display:'block', marginBottom:'6px', color:'rgba(255,255,255,0.4)', fontSize:'13px' }}>معرف العتاد (Hardware ID)</label>
+        <input type="text" value={hardwareIdParam} onChange={e => setHardwareIdParam(e.target.value)} disabled={locked}
+          style={{ width:'100%', padding:'11px 14px', background:'rgba(0,0,0,0.3)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'8px', color:'white', fontSize:'14px', marginBottom:'14px', boxSizing:'border-box' }} />
+        <label style={{ display:'block', marginBottom:'6px', color:'rgba(255,255,255,0.4)', fontSize:'13px' }}>اسم العميل / المختبر</label>
+        <input type="text" value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)}
+          style={{ width:'100%', padding:'11px 14px', background:'rgba(0,0,0,0.3)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'8px', color:'white', fontSize:'14px', marginBottom:'18px', boxSizing:'border-box' }} />
+        <ModalBtn bg="linear-gradient(135deg,#00f2fe,#4facfe)" color="#0b0f19" onClick={onRegister} full>تسجيل الجهاز</ModalBtn>
+        <div style={{ height:'8px' }} />
+        <ModalBtn onClick={onClose} full>إلغاء</ModalBtn>
+      </ModalBox>
+    </Overlay>
+  )
+}
+
+// ─── First Install Modal ───────────────────────────────────────────────────────
+function FirstInstallModal({ device, tests, setTests, group, setGroup, groupQty, setGroupQty, onApplyGroup, onSave, onClose }) {
+  return (
+    <Overlay onClick={onClose}>
+      <ModalBox style={{ maxWidth:'560px', maxHeight:'80vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize:'17px', fontWeight:'700', color:'#34d399', marginBottom:'4px' }}>✨ التنصيب الأول — تفعيل بدون باركود</div>
+        <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'12px', marginBottom:'16px' }}>الجهاز: <span style={{ color:'#4facfe' }}>{device.customer}</span></div>
+
+        {/* Group preset */}
+        <div style={{ display:'flex', gap:'8px', marginBottom:'14px', alignItems:'center', flexWrap:'wrap' }}>
+          <select value={group} onChange={e => setGroup(e.target.value)} style={{ padding:'7px 10px', background:'rgba(0,0,0,0.4)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'white', fontSize:'13px' }}>
+            <option value="">اختر مجموعة فحوصات...</option>
+            {Object.keys(TEST_GROUPS).map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <input type="number" value={groupQty} onChange={e => setGroupQty(+e.target.value)} min="1" style={{ width:'80px', padding:'7px 10px', background:'rgba(0,0,0,0.4)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'white', fontSize:'13px' }} />
+          <button onClick={onApplyGroup} style={{ padding:'7px 14px', background:'rgba(52,211,153,0.15)', color:'#34d399', border:'1px solid rgba(52,211,153,0.3)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700' }}>تطبيق المجموعة</button>
+        </div>
+
+        {/* Individual tests */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'18px' }}>
+          {ALL_TESTS.map(t => (
+            <div key={t} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 10px', background:'rgba(255,255,255,0.03)', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.06)' }}>
+              <span style={{ color:'rgba(255,255,255,0.7)', fontSize:'12px' }}>{t}</span>
+              <input type="number" value={tests[t] || 0} min="0"
+                onChange={e => setTests(prev => ({ ...prev, [t]: Math.max(0, +e.target.value) }))}
+                style={{ width:'60px', padding:'3px 6px', background:'rgba(0,0,0,0.4)', border:`1px solid ${(tests[t] || 0) > 0 ? 'rgba(52,211,153,0.4)' : 'rgba(255,255,255,0.1)'}`, borderRadius:'4px', color:'white', fontSize:'12px', textAlign:'center' }} />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ color:'rgba(255,255,255,0.3)', fontSize:'11px', marginBottom:'14px' }}>
+          إجمالي الفحوصات المفعّلة: {Object.values(tests).reduce((s, v) => s + v, 0)} | أنواع نشطة: {Object.values(tests).filter(v => v > 0).length}
+        </div>
+
+        <div style={{ display:'flex', gap:'10px', justifyContent:'center' }}>
+          <ModalBtn bg="#34d399" color="#0b0f19" onClick={onSave}>حفظ وتفعيل</ModalBtn>
+          <ModalBtn onClick={onClose}>إلغاء</ModalBtn>
+        </div>
+      </ModalBox>
+    </Overlay>
+  )
+}
+
+// ─── Shared UI primitives ─────────────────────────────────────────────────────
+function Overlay({ children, onClick }) {
+  return (
+    <div onClick={onClick} style={{ position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(0,0,0,0.75)', backdropFilter:'blur(8px)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:1000 }}>
+      {children}
+    </div>
+  )
+}
+
+function ModalBox({ children, style = {}, onClick }) {
+  return (
+    <div onClick={onClick} style={{ width:'90%', maxWidth:'420px', padding:'28px', background:'rgba(15,20,35,0.97)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'16px', backdropFilter:'blur(20px)', textAlign:'center', ...style }}>
+      {children}
+    </div>
+  )
+}
+
+function ModalBtn({ bg = 'transparent', color = 'rgba(255,255,255,0.5)', children, onClick, full }) {
+  return (
+    <button onClick={onClick} style={{ padding:'10px 22px', background: bg, border:`1px solid ${bg === 'transparent' ? 'rgba(255,255,255,0.15)' : 'transparent'}`, borderRadius:'8px', color, fontSize:'14px', fontWeight:'700', cursor:'pointer', width: full ? '100%' : undefined }}>
+      {children}
+    </button>
+  )
+}
