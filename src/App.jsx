@@ -224,27 +224,42 @@ export default function App() {
   }
 
   // ── First Install: No-Barcode Activation ──────────────────────────────────────
-  const openFirstInstall = (device) => {
+  const openFirstInstall = async (device) => {
     setFiDevice(device)
-    // Use actual blocked tests from device; fall back to ALL_TESTS if none configured
-    const blocked = device.blocked_tests
-      ? device.blocked_tests.split(',').map(t => t.trim()).filter(Boolean)
-      : ALL_TESTS
-    const testList = blocked.length > 0 ? blocked : ALL_TESTS
+    // Always show ALL_TESTS so group presets always work
     const init = {}
-    testList.forEach(t => { init[t] = 0 })
+    ALL_TESTS.forEach(t => { init[t] = 0 })
     setFiTests(init)
     setFiGroup('')
     setFiGroupQty(100)
     setFirstInstallModal(true)
+    // Pre-fill with existing quota balances from DB (remaining = total - used)
+    try {
+      const res = await fetch(`/api/test_quotas?device_id=${encodeURIComponent(device.id)}`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.quotas && data.quotas.length > 0) {
+          setFiTests(prev => {
+            const updated = { ...prev }
+            data.quotas.forEach(q => {
+              const remaining = Math.max(0, Number(q.total_quota) - Number(q.used_count))
+              updated[q.test_code] = remaining
+            })
+            return updated
+          })
+        }
+      }
+    } catch {}
   }
 
   const applyGroupPreset = () => {
     if (!fiGroup || !TEST_GROUPS[fiGroup]) return
-    const updated = { ...fiTests }
-    // Only apply qty to tests that are actually in this device's blocked list
-    TEST_GROUPS[fiGroup].forEach(t => { if (t in updated) updated[t] = fiGroupQty })
-    setFiTests(updated)
+    // Use functional setState to avoid stale closure; apply to ALL group tests
+    setFiTests(prev => {
+      const updated = { ...prev }
+      TEST_GROUPS[fiGroup].forEach(t => { updated[t] = fiGroupQty })
+      return updated
+    })
   }
 
   const handleFirstInstallSave = async () => {
@@ -616,36 +631,68 @@ function RegisterModal({ hardwareIdParam, setHardwareIdParam, newCustomerName, s
 
 // ─── First Install Modal ───────────────────────────────────────────────────────
 function FirstInstallModal({ device, tests, setTests, group, setGroup, groupQty, setGroupQty, onApplyGroup, onSave, onClose }) {
+  const blockedSet = new Set(
+    device.blocked_tests ? device.blocked_tests.split(',').map(t => t.trim()).filter(Boolean) : []
+  )
+  const activeCount  = Object.values(tests).filter(v => v > 0).length
+  const activeTotal  = Object.values(tests).reduce((s, v) => s + v, 0)
+
   return (
     <Overlay onClick={onClose}>
-      <ModalBox style={{ maxWidth:'560px', maxHeight:'80vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
+      <ModalBox style={{ maxWidth:'580px', maxHeight:'85vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize:'17px', fontWeight:'700', color:'#34d399', marginBottom:'4px' }}>✨ التنصيب الأول — تفعيل بدون باركود</div>
-        <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'12px', marginBottom:'16px' }}>الجهاز: <span style={{ color:'#4facfe' }}>{device.customer}</span></div>
+        <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'12px', marginBottom:'4px' }}>الجهاز: <span style={{ color:'#4facfe' }}>{device.customer}</span></div>
+        {blockedSet.size > 0 && (
+          <div style={{ fontSize:'11px', color:'rgba(255,255,255,0.3)', marginBottom:'12px' }}>
+            🔴 محجوب فعلاً: <span style={{ color:'#f87171' }}>{[...blockedSet].join(', ')}</span>
+          </div>
+        )}
 
-        {/* Group preset */}
-        <div style={{ display:'flex', gap:'8px', marginBottom:'14px', alignItems:'center', flexWrap:'wrap' }}>
-          <select value={group} onChange={e => setGroup(e.target.value)} style={{ padding:'7px 10px', background:'rgba(0,0,0,0.4)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'white', fontSize:'13px' }}>
-            <option value="">اختر مجموعة فحوصات...</option>
+        {/* Group preset row */}
+        <div style={{ display:'flex', gap:'8px', marginBottom:'14px', alignItems:'center', flexWrap:'wrap', background:'rgba(255,255,255,0.03)', borderRadius:'8px', padding:'10px' }}>
+          <select value={group} onChange={e => setGroup(e.target.value)}
+            style={{ flex:1, minWidth:'160px', padding:'7px 10px', background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:'6px', color:'white', fontSize:'13px' }}>
+            <option value="">اختر باقة فحوصات...</option>
             {Object.keys(TEST_GROUPS).map(g => <option key={g} value={g}>{g}</option>)}
           </select>
-          <input type="number" value={groupQty} onChange={e => setGroupQty(+e.target.value)} min="1" style={{ width:'80px', padding:'7px 10px', background:'rgba(0,0,0,0.4)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'white', fontSize:'13px' }} />
-          <button onClick={onApplyGroup} style={{ padding:'7px 14px', background:'rgba(52,211,153,0.15)', color:'#34d399', border:'1px solid rgba(52,211,153,0.3)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700' }}>تطبيق المجموعة</button>
+          <input type="number" value={groupQty} onChange={e => setGroupQty(+e.target.value)} min="1"
+            style={{ width:'80px', padding:'7px 10px', background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:'6px', color:'white', fontSize:'13px', textAlign:'center' }} />
+          <button onClick={onApplyGroup}
+            style={{ padding:'7px 16px', background:'rgba(52,211,153,0.2)', color:'#34d399', border:'1px solid rgba(52,211,153,0.4)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700', whiteSpace:'nowrap' }}>
+            ✔ تطبيق الباقة
+          </button>
         </div>
 
-        {/* Individual tests — only the blocked tests for this device */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'18px' }}>
-          {Object.keys(tests).map(t => (
-            <div key={t} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 10px', background:(tests[t] || 0) > 0 ? 'rgba(52,211,153,0.06)' : 'rgba(255,255,255,0.03)', borderRadius:'6px', border:`1px solid ${(tests[t] || 0) > 0 ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.06)'}` }}>
-              <span style={{ color:(tests[t] || 0) > 0 ? '#34d399' : 'rgba(255,255,255,0.7)', fontSize:'12px', fontWeight:(tests[t] || 0) > 0 ? '600' : '400' }}>{t}</span>
-              <input type="number" value={tests[t] || 0} min="0"
-                onChange={e => setTests(prev => ({ ...prev, [t]: Math.max(0, +e.target.value) }))}
-                style={{ width:'60px', padding:'3px 6px', background:'rgba(0,0,0,0.4)', border:`1px solid ${(tests[t] || 0) > 0 ? 'rgba(52,211,153,0.4)' : 'rgba(255,255,255,0.1)'}`, borderRadius:'4px', color:'white', fontSize:'12px', textAlign:'center' }} />
-            </div>
-          ))}
+        {/* All tests grid */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'7px', marginBottom:'16px' }}>
+          {ALL_TESTS.map(t => {
+            const qty     = tests[t] || 0
+            const blocked = blockedSet.has(t)
+            const active  = qty > 0
+            return (
+              <div key={t} style={{
+                display:'flex', alignItems:'center', justifyContent:'space-between',
+                padding:'7px 10px', borderRadius:'6px',
+                background: active ? 'rgba(52,211,153,0.08)' : blocked ? 'rgba(239,68,68,0.06)' : 'rgba(255,255,255,0.02)',
+                border: `1px solid ${active ? 'rgba(52,211,153,0.3)' : blocked ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.05)'}`
+              }}>
+                <span style={{ fontSize:'11px', fontWeight: active ? '700' : '400',
+                  color: active ? '#34d399' : blocked ? '#f87171' : 'rgba(255,255,255,0.55)' }}>
+                  {blocked ? '🔴 ' : ''}{t}
+                </span>
+                <input type="number" value={qty} min="0"
+                  onChange={e => setTests(prev => ({ ...prev, [t]: Math.max(0, +e.target.value) }))}
+                  style={{ width:'58px', padding:'3px 6px', background:'rgba(0,0,0,0.5)',
+                    border:`1px solid ${active ? 'rgba(52,211,153,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                    borderRadius:'4px', color:'white', fontSize:'12px', textAlign:'center' }} />
+              </div>
+            )
+          })}
         </div>
 
-        <div style={{ color:'rgba(255,255,255,0.3)', fontSize:'11px', marginBottom:'14px' }}>
-          إجمالي الفحوصات المفعّلة: {Object.values(tests).reduce((s, v) => s + v, 0)} | أنواع نشطة: {Object.values(tests).filter(v => v > 0).length}
+        <div style={{ color:'rgba(255,255,255,0.35)', fontSize:'11px', marginBottom:'14px', textAlign:'center' }}>
+          أنواع نشطة: <span style={{ color:'#34d399', fontWeight:'700' }}>{activeCount}</span> &nbsp;|&nbsp;
+          إجمالي الكميات: <span style={{ color:'#fbbf24', fontWeight:'700' }}>{activeTotal}</span>
         </div>
 
         <div style={{ display:'flex', gap:'10px', justifyContent:'center' }}>
