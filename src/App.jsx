@@ -88,7 +88,7 @@ export default function App() {
           device: d
         })
         // Persist to server (fire-and-forget; server deduplicates within 24h)
-        fetch('/api/notify', {
+        fetch('/api/monitoring?scope=notify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -348,7 +348,7 @@ export default function App() {
               <button onClick={() => {
                 setNotifications([])
                 setShowNotifPanel(false)
-                fetch('/api/notify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'mark_read' }) }).catch(()=>{})
+                fetch('/api/monitoring?scope=notify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'mark_read' }) }).catch(()=>{})
               }} style={{ padding:'4px 10px', background:'rgba(100,200,100,0.1)', color:'#34d399', border:'1px solid rgba(52,211,153,0.2)', borderRadius:'4px', cursor:'pointer', fontSize:'12px' }}>
                 ✔ تم الاطلاع على الجميع
               </button>
@@ -518,7 +518,7 @@ function hexToRgb(hex) {
 function ActivityLog({ devices }) {
   const [logs, setLogs] = useState([])
   useEffect(() => {
-    fetch('/api/activity_log')
+    fetch('/api/monitoring?scope=activity')
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => setLogs(d.logs || []))
       .catch(() => {
