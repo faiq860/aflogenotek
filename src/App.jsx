@@ -226,8 +226,13 @@ export default function App() {
   // ── First Install: No-Barcode Activation ──────────────────────────────────────
   const openFirstInstall = (device) => {
     setFiDevice(device)
+    // Use actual blocked tests from device; fall back to ALL_TESTS if none configured
+    const blocked = device.blocked_tests
+      ? device.blocked_tests.split(',').map(t => t.trim()).filter(Boolean)
+      : ALL_TESTS
+    const testList = blocked.length > 0 ? blocked : ALL_TESTS
     const init = {}
-    ALL_TESTS.forEach(t => { init[t] = 0 })
+    testList.forEach(t => { init[t] = 0 })
     setFiTests(init)
     setFiGroup('')
     setFiGroupQty(100)
@@ -237,7 +242,8 @@ export default function App() {
   const applyGroupPreset = () => {
     if (!fiGroup || !TEST_GROUPS[fiGroup]) return
     const updated = { ...fiTests }
-    TEST_GROUPS[fiGroup].forEach(t => { updated[t] = fiGroupQty })
+    // Only apply qty to tests that are actually in this device's blocked list
+    TEST_GROUPS[fiGroup].forEach(t => { if (t in updated) updated[t] = fiGroupQty })
     setFiTests(updated)
   }
 
@@ -626,11 +632,11 @@ function FirstInstallModal({ device, tests, setTests, group, setGroup, groupQty,
           <button onClick={onApplyGroup} style={{ padding:'7px 14px', background:'rgba(52,211,153,0.15)', color:'#34d399', border:'1px solid rgba(52,211,153,0.3)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700' }}>تطبيق المجموعة</button>
         </div>
 
-        {/* Individual tests */}
+        {/* Individual tests — only the blocked tests for this device */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'18px' }}>
-          {ALL_TESTS.map(t => (
-            <div key={t} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 10px', background:'rgba(255,255,255,0.03)', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.06)' }}>
-              <span style={{ color:'rgba(255,255,255,0.7)', fontSize:'12px' }}>{t}</span>
+          {Object.keys(tests).map(t => (
+            <div key={t} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 10px', background:(tests[t] || 0) > 0 ? 'rgba(52,211,153,0.06)' : 'rgba(255,255,255,0.03)', borderRadius:'6px', border:`1px solid ${(tests[t] || 0) > 0 ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.06)'}` }}>
+              <span style={{ color:(tests[t] || 0) > 0 ? '#34d399' : 'rgba(255,255,255,0.7)', fontSize:'12px', fontWeight:(tests[t] || 0) > 0 ? '600' : '400' }}>{t}</span>
               <input type="number" value={tests[t] || 0} min="0"
                 onChange={e => setTests(prev => ({ ...prev, [t]: Math.max(0, +e.target.value) }))}
                 style={{ width:'60px', padding:'3px 6px', background:'rgba(0,0,0,0.4)', border:`1px solid ${(tests[t] || 0) > 0 ? 'rgba(52,211,153,0.4)' : 'rgba(255,255,255,0.1)'}`, borderRadius:'4px', color:'white', fontSize:'12px', textAlign:'center' }} />
