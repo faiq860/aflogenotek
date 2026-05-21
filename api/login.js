@@ -5,10 +5,8 @@ export default async function handler(req, res) {
 
   const { username, password } = req.body;
   
-  // قراءة القيم من متغيرات البيئة (Environment Variables) في فيرسل
-  // مع وضع قيم افتراضية للتجربة المحلية
-  const validUsername = process.env.DASHBOARD_USERNAME || "afloadmin";
-  const validPassword = process.env.DASHBOARD_PASSWORD || "aflo_genotek0987";
+  const validUsername = "afloadmin";
+  const validPassword = "aflo_genotek0987";
   
   if (username === validUsername && password === validPassword) {
     res.status(200).json({ success: true });
