@@ -289,6 +289,17 @@ export default function App() {
     })
   }
 
+  const applyBlockedPreset = () => {
+    if (fiBlocked.size === 0) {
+      alert('لا توجد فحوصات محجوبة لتفعيلها!'); return;
+    }
+    setFiTests(prev => {
+      const updated = { ...prev }
+      fiBlocked.forEach(t => { updated[t] = fiGroupQty })
+      return updated
+    })
+  }
+
   const handleFirstInstallSave = async () => {
     const entries = Object.entries(fiTests).filter(([, qty]) => qty > 0)
     if (entries.length === 0 && fiBlocked.size === 0) {
@@ -557,7 +568,7 @@ export default function App() {
           device={fiDevice} tests={fiTests} setTests={setFiTests}
           blocked={fiBlocked} setBlocked={setFiBlocked}
           group={fiGroup} setGroup={setFiGroup} groupQty={fiGroupQty} setGroupQty={setFiGroupQty}
-          onApplyGroup={applyGroupPreset} onSave={handleFirstInstallSave} onClose={() => setFirstInstallModal(false)} />
+          onApplyGroup={applyGroupPreset} onApplyBlocked={applyBlockedPreset} onSave={handleFirstInstallSave} onClose={() => setFirstInstallModal(false)} />
       )}
       {quotaDevice && <QuotaManager device={quotaDevice} onClose={() => setQuotaDevice(null)} />}
     </div>
@@ -871,7 +882,7 @@ function RegisterModal({ hardwareIdParam, setHardwareIdParam, newCustomerName, s
 }
 
 // ─── First Install Modal ───────────────────────────────────────────────────────
-function FirstInstallModal({ device, tests, setTests, blocked, setBlocked, group, setGroup, groupQty, setGroupQty, onApplyGroup, onSave, onClose }) {
+function FirstInstallModal({ device, tests, setTests, blocked, setBlocked, group, setGroup, groupQty, setGroupQty, onApplyGroup, onApplyBlocked, onSave, onClose }) {
   const activeCount = Object.values(tests).filter(v => v > 0).length
   const activeTotal = Object.values(tests).reduce((s, v) => s + v, 0)
 
@@ -910,6 +921,10 @@ function FirstInstallModal({ device, tests, setTests, blocked, setBlocked, group
           <button onClick={onApplyGroup}
             style={{ padding:'7px 16px', background:'rgba(52,211,153,0.2)', color:'#34d399', border:'1px solid rgba(52,211,153,0.4)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700', whiteSpace:'nowrap' }}>
             ✔ تطبيق الباقة
+          </button>
+          <button onClick={onApplyBlocked}
+            style={{ padding:'7px 16px', background:'rgba(239,68,68,0.2)', color:'#ef4444', border:'1px solid rgba(239,68,68,0.4)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700', whiteSpace:'nowrap' }}>
+            🚫 تفعيل كل المحجوبة
           </button>
         </div>
 
