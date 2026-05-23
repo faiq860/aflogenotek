@@ -116,6 +116,19 @@ export default async function handler(req, res) {
 
         return res.status(200).json({ success: true, message: 'تم تحديث حصة الفحص بنجاح' });
 
+      } else if (action === 'force_set') {
+        // SET (not add) total_quota — used by First Install modal
+        await client.query(`
+          INSERT INTO test_quotas (device_id, test_code, test_name, total_quota, used_count, alert_threshold)
+          VALUES ($1, $2, $3, $4, 0, $5)
+          ON CONFLICT (device_id, test_code) DO UPDATE
+          SET total_quota = $4,
+              test_name = $3,
+              alert_threshold = $5,
+              updated_at = NOW()
+        `, [deviceId, testCode, testName, totalQuota, alertThreshold || 20]);
+        return res.status(200).json({ success: true, message: 'تم ضبط حصة الفحص' });
+
       } else if (action === 'reset_quota') {
         // إعادة تعيين الحصة (عند مسح QR جديد)
         const { quantity } = req.body;

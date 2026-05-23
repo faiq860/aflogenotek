@@ -43,6 +43,16 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, message: 'Hardware lock reset successfully! Ready to bind new PC/Analyzer.' });
     }
 
+    // ── UPDATE BLOCKING RULES ────────────────────────────────────────────────
+    if (action === 'update_blocking') {
+      const { blocked_tests, blocked_pages } = req.body;
+      await client.query(
+        `UPDATE machines SET blocked_tests = $1, blocked_pages = COALESCE(NULLIF($2, ''), blocked_pages) WHERE hardware_id = $3`,
+        [blocked_tests ?? '', blocked_pages ?? '', hardwareId]
+      );
+      return res.status(200).json({ success: true, message: 'Blocking rules updated' });
+    }
+
     // ── UPDATE (rename customer) ──────────────────────────────────────────────
     if (!customerName) {
       return res.status(400).json({ error: 'Missing customerName' });

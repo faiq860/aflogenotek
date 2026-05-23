@@ -158,22 +158,42 @@ export default async function handler(req, res) {
 
     // Fetch the updated machine state to return as source-of-truth configuration
     const currentMachineRes = await client.query(`
-      SELECT machine_name, authorized_machine_hash, authorized_analyzer_serial, blocked_tests, blocked_pages 
-      FROM machines 
+      SELECT machine_name, authorized_machine_hash, authorized_analyzer_serial, blocked_tests, blocked_pages
+      FROM machines
       WHERE hardware_id = $1
     `, [HardwareId]);
 
     const currentMachine = currentMachineRes.rows[0];
 
-    res.status(200).json({ 
-      success: true, 
+    // Fetch test quotas for this device (if table exists)
+    let testQuotas = [];
+    try {
+      const quotasRes = await client.query(`
+        SELECT test_code, test_name, total_quota, used_count, alert_threshold
+        FROM test_quotas
+        WHERE device_id = $1 AND is_active = true
+        ORDER BY test_code
+      `, [HardwareId]);
+      testQuotas = quotasRes.rows.map(q => ({
+        test_code:       q.test_code,
+        test_name:       q.test_name,
+        total_quota:     Number(q.total_quota),
+        used_count:      Number(q.used_count),
+        remaining:       Math.max(0, Number(q.total_quota) - Number(q.used_count)),
+        alert_threshold: Number(q.alert_threshold) || 20
+      }));
+    } catch (_) { /* table may not exist yet */ }
+
+    res.status(200).json({
+      success: true,
       message: 'Heartbeat received and verified successfully',
       blocked_tests: currentMachine.blocked_tests || '',
       blocked_pages: currentMachine.blocked_pages || '',
       customer_name: currentMachine.machine_name || '',
       analyzer_serial: currentMachine.authorized_analyzer_serial || currentMachine.analyzer_serial || '',
       authorized_machine_hash: currentMachine.authorized_machine_hash || '',
-      authorized_analyzer_serial: currentMachine.authorized_analyzer_serial || ''
+      authorized_analyzer_serial: currentMachine.authorized_analyzer_serial || '',
+      test_quotas: testQuotas
     });
   } catch (error) {
     console.error(error);

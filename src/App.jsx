@@ -66,6 +66,7 @@ export default function App() {
   const [fiGroupQty,        setFiGroupQty]          = useState(100)
   const [activeTab,         setActiveTab]           = useState('devices')
   const [activityDevice,    setActivityDevice]      = useState(null)
+  const [fiBlocked,         setFiBlocked]           = useState(new Set())
 
   // ── fetch helpers ────────────────────────────────────────────────────────────
   const fetchDevices = useCallback(async () => {
@@ -227,14 +228,27 @@ export default function App() {
   // ── First Install: No-Barcode Activation ──────────────────────────────────────
   const openFirstInstall = async (device) => {
     setFiDevice(device)
-    // Always show ALL_TESTS so group presets always work
     const init = {}
     ALL_TESTS.forEach(t => { init[t] = 0 })
+
+    // تحميل الفحوصات المحجوبة الحالية
+    setFiBlocked(new Set(
+      device.blocked_tests ? device.blocked_tests.split(',').map(s => s.trim()).filter(Boolean) : []
+    ))
+
+    // ملء فوري من بيانات الجهاز المحملة مسبقاً (total_quota وليس remaining)
+    if (device.test_quotas && device.test_quotas.length > 0) {
+      device.test_quotas.forEach(q => {
+        init[q.test_code] = Number(q.total_quota) || 0
+      })
+    }
+
     setFiTests(init)
     setFiGroup('')
     setFiGroupQty(100)
     setFirstInstallModal(true)
-    // Pre-fill with existing quota balances from DB (remaining = total - used)
+
+    // تحديث من قاعدة البيانات
     try {
       const res = await fetch(`/api/test_quotas?device_id=${encodeURIComponent(device.id)}`)
       if (res.ok) {
@@ -242,10 +256,7 @@ export default function App() {
         if (data.quotas && data.quotas.length > 0) {
           setFiTests(prev => {
             const updated = { ...prev }
-            data.quotas.forEach(q => {
-              const remaining = Math.max(0, Number(q.total_quota) - Number(q.used_count))
-              updated[q.test_code] = remaining
-            })
+            data.quotas.forEach(q => { updated[q.test_code] = Number(q.total_quota) || 0 })
             return updated
           })
         }
@@ -265,15 +276,28 @@ export default function App() {
 
   const handleFirstInstallSave = async () => {
     const entries = Object.entries(fiTests).filter(([, qty]) => qty > 0)
-    if (entries.length === 0) { alert('أدخل كمية لفحص واحد على الأقل.'); return }
+    if (entries.length === 0 && fiBlocked.size === 0) {
+      alert('أدخل كمية لفحص واحد أو حدد فحوصات محجوبة على الأقل.'); return
+    }
     try {
+      // 1. ضبط حصص الفحوصات (force_set يُعيّن القيمة لا يُضيف إليها)
       for (const [testCode, qty] of entries) {
         await fetch('/api/test_quotas', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'upsert', deviceId: fiDevice.id, testCode, testName: testCode, totalQuota: qty, alertThreshold: 20 })
+          body: JSON.stringify({ action: 'force_set', deviceId: fiDevice.id, testCode, testName: testCode, totalQuota: qty, alertThreshold: 20 })
         })
       }
-      alert(`✔ تم تفعيل ${entries.length} فحص لـ ${fiDevice.customer} بدون باركود!`)
+      // 2. حفظ الفحوصات المحجوبة
+      const blockedStr = [...fiBlocked].join(',')
+      await fetch('/api/device_ops', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_blocking', hardwareId: fiDevice.id, blocked_tests: blockedStr })
+      })
+      const parts = []
+      if (entries.length > 0) parts.push(`تفعيل ${entries.length} فحص`)
+      if (fiBlocked.size > 0) parts.push(`حجب ${fiBlocked.size} فحص`)
+      else parts.push('فُك حجب جميع الفحوصات')
+      alert(`✔ ${parts.join(' و ')} لـ ${fiDevice.customer}!`)
       setFirstInstallModal(false); fetchDevices()
     } catch { alert('حدث خطأ أثناء الحفظ') }
   }
@@ -516,6 +540,7 @@ export default function App() {
       {firstInstallModal && fiDevice && (
         <FirstInstallModal
           device={fiDevice} tests={fiTests} setTests={setFiTests}
+          blocked={fiBlocked} setBlocked={setFiBlocked}
           group={fiGroup} setGroup={setFiGroup} groupQty={fiGroupQty} setGroupQty={setFiGroupQty}
           onApplyGroup={applyGroupPreset} onSave={handleFirstInstallSave} onClose={() => setFirstInstallModal(false)} />
       )}
@@ -566,12 +591,18 @@ function DeviceActivityModal({ device, onClose }) {
     instant.push({ event_type:'ANALYZER_BIND', details:`المحلل: ${device.authorizedAnalyzerSerial}`, logged_at:ts })
 
   useEffect(() => {
+    // إذا كانت البيانات موجودة مسبقاً في كائن الجهاز استخدمها فوراً
+    if (device.test_quotas && device.test_quotas.length > 0) {
+      setQuotas(device.test_quotas)
+      setLoading(false)
+    }
+    // استعلام API للتحديث + سجل الأحداث
     Promise.all([
       fetch(`/api/monitoring?scope=activity&hardware_id=${encodeURIComponent(device.id)}`).then(r => r.ok ? r.json() : {}),
       fetch(`/api/test_quotas?device_id=${encodeURIComponent(device.id)}`).then(r => r.ok ? r.json() : {})
     ]).then(([actData, qData]) => {
       setDbLogs(actData.logs || [])
-      setQuotas(qData.quotas || [])
+      if (qData.quotas && qData.quotas.length > 0) setQuotas(qData.quotas)
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [device.id])
@@ -825,26 +856,35 @@ function RegisterModal({ hardwareIdParam, setHardwareIdParam, newCustomerName, s
 }
 
 // ─── First Install Modal ───────────────────────────────────────────────────────
-function FirstInstallModal({ device, tests, setTests, group, setGroup, groupQty, setGroupQty, onApplyGroup, onSave, onClose }) {
-  const blockedSet = new Set(
-    device.blocked_tests ? device.blocked_tests.split(',').map(t => t.trim()).filter(Boolean) : []
-  )
-  const activeCount  = Object.values(tests).filter(v => v > 0).length
-  const activeTotal  = Object.values(tests).reduce((s, v) => s + v, 0)
+function FirstInstallModal({ device, tests, setTests, blocked, setBlocked, group, setGroup, groupQty, setGroupQty, onApplyGroup, onSave, onClose }) {
+  const activeCount = Object.values(tests).filter(v => v > 0).length
+  const activeTotal = Object.values(tests).reduce((s, v) => s + v, 0)
+
+  const toggleBlock = (t) => setBlocked(prev => {
+    const next = new Set(prev)
+    if (next.has(t)) next.delete(t); else next.add(t)
+    return next
+  })
 
   return (
     <Overlay onClick={onClose}>
-      <ModalBox style={{ maxWidth:'580px', maxHeight:'85vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
+      <ModalBox style={{ maxWidth:'600px', maxHeight:'88vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize:'17px', fontWeight:'700', color:'#34d399', marginBottom:'4px' }}>✨ التنصيب الأول — تفعيل بدون باركود</div>
-        <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'12px', marginBottom:'4px' }}>الجهاز: <span style={{ color:'#4facfe' }}>{device.customer}</span></div>
-        {blockedSet.size > 0 && (
-          <div style={{ fontSize:'11px', color:'rgba(255,255,255,0.3)', marginBottom:'12px' }}>
-            🔴 محجوب فعلاً: <span style={{ color:'#f87171' }}>{[...blockedSet].join(', ')}</span>
-          </div>
-        )}
+        <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'12px', marginBottom:'12px' }}>
+          الجهاز: <span style={{ color:'#4facfe' }}>{device.customer}</span>
+          <span style={{ color:'rgba(255,255,255,0.25)', marginRight:'10px' }}>الكمية = الرصيد الإجمالي الجديد</span>
+        </div>
+
+        {/* Legend */}
+        <div style={{ display:'flex', gap:'16px', fontSize:'11px', color:'rgba(255,255,255,0.35)', marginBottom:'10px', padding:'6px 10px', background:'rgba(255,255,255,0.02)', borderRadius:'6px' }}>
+          <span>🟢 نشط بكمية</span>
+          <span>🔴 محجوب (اضغط لتبديل)</span>
+          <span>🟡 نشط + محجوب</span>
+          <span>⚪ غير مفعّل</span>
+        </div>
 
         {/* Group preset row */}
-        <div style={{ display:'flex', gap:'8px', marginBottom:'14px', alignItems:'center', flexWrap:'wrap', background:'rgba(255,255,255,0.03)', borderRadius:'8px', padding:'10px' }}>
+        <div style={{ display:'flex', gap:'8px', marginBottom:'12px', alignItems:'center', flexWrap:'wrap', background:'rgba(255,255,255,0.03)', borderRadius:'8px', padding:'10px' }}>
           <select value={group} onChange={e => setGroup(e.target.value)}
             style={{ flex:1, minWidth:'160px', padding:'7px 10px', background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:'6px', color:'white', fontSize:'13px' }}>
             <option value="">اختر باقة فحوصات...</option>
@@ -859,35 +899,45 @@ function FirstInstallModal({ device, tests, setTests, group, setGroup, groupQty,
         </div>
 
         {/* All tests grid */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'7px', marginBottom:'16px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px', marginBottom:'14px' }}>
           {ALL_TESTS.map(t => {
-            const qty     = tests[t] || 0
-            const blocked = blockedSet.has(t)
-            const active  = qty > 0
+            const qty        = tests[t] || 0
+            const isBlocked  = blocked.has(t)
+            const active     = qty > 0
+            const bothActive = active && isBlocked
+
+            const bgColor    = bothActive ? 'rgba(245,158,11,0.10)' : isBlocked ? 'rgba(239,68,68,0.10)' : active ? 'rgba(52,211,153,0.08)' : 'rgba(255,255,255,0.02)'
+            const bdColor    = bothActive ? 'rgba(245,158,11,0.35)' : isBlocked ? 'rgba(239,68,68,0.35)' : active ? 'rgba(52,211,153,0.30)' : 'rgba(255,255,255,0.05)'
+            const nameColor  = isBlocked ? '#f87171' : active ? '#34d399' : 'rgba(255,255,255,0.55)'
+
             return (
-              <div key={t} style={{
-                display:'flex', alignItems:'center', justifyContent:'space-between',
-                padding:'7px 10px', borderRadius:'6px',
-                background: active ? 'rgba(52,211,153,0.08)' : blocked ? 'rgba(239,68,68,0.06)' : 'rgba(255,255,255,0.02)',
-                border: `1px solid ${active ? 'rgba(52,211,153,0.3)' : blocked ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.05)'}`
-              }}>
-                <span style={{ fontSize:'11px', fontWeight: active ? '700' : '400',
-                  color: active ? '#34d399' : blocked ? '#f87171' : 'rgba(255,255,255,0.55)' }}>
-                  {blocked ? '🔴 ' : ''}{t}
+              <div key={t} style={{ display:'flex', alignItems:'center', gap:'6px', padding:'6px 8px', borderRadius:'6px', background:bgColor, border:`1px solid ${bdColor}` }}>
+                {/* Block toggle */}
+                <button
+                  onClick={() => toggleBlock(t)}
+                  title={isBlocked ? 'إلغاء الحجب' : 'حجب هذا الفحص'}
+                  style={{ background:'transparent', border:'none', cursor:'pointer', fontSize:'13px', padding:'0', flexShrink:0, lineHeight:1 }}>
+                  {bothActive ? '🟡' : isBlocked ? '🔴' : active ? '🟢' : '⚪'}
+                </button>
+                {/* Test name */}
+                <span style={{ flex:1, fontSize:'11px', fontWeight: active ? '700' : '400', color:nameColor, textDecoration: isBlocked ? 'line-through' : 'none', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {t}
                 </span>
+                {/* Qty input */}
                 <input type="number" value={qty} min="0"
                   onChange={e => setTests(prev => ({ ...prev, [t]: Math.max(0, +e.target.value) }))}
-                  style={{ width:'58px', padding:'3px 6px', background:'rgba(0,0,0,0.5)',
+                  style={{ width:'54px', padding:'3px 5px', background:'rgba(0,0,0,0.5)',
                     border:`1px solid ${active ? 'rgba(52,211,153,0.5)' : 'rgba(255,255,255,0.1)'}`,
-                    borderRadius:'4px', color:'white', fontSize:'12px', textAlign:'center' }} />
+                    borderRadius:'4px', color:'white', fontSize:'12px', textAlign:'center', flexShrink:0 }} />
               </div>
             )
           })}
         </div>
 
         <div style={{ color:'rgba(255,255,255,0.35)', fontSize:'11px', marginBottom:'14px', textAlign:'center' }}>
-          أنواع نشطة: <span style={{ color:'#34d399', fontWeight:'700' }}>{activeCount}</span> &nbsp;|&nbsp;
-          إجمالي الكميات: <span style={{ color:'#fbbf24', fontWeight:'700' }}>{activeTotal}</span>
+          نشط: <span style={{ color:'#34d399', fontWeight:'700' }}>{activeCount}</span> &nbsp;|&nbsp;
+          إجمالي: <span style={{ color:'#fbbf24', fontWeight:'700' }}>{activeTotal}</span> &nbsp;|&nbsp;
+          محجوب: <span style={{ color:'#f87171', fontWeight:'700' }}>{blocked.size}</span>
         </div>
 
         <div style={{ display:'flex', gap:'10px', justifyContent:'center' }}>
