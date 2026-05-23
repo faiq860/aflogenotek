@@ -910,22 +910,26 @@ function FirstInstallModal({ device, tests, setTests, blocked, setBlocked, group
         </div>
 
         {/* Group preset row */}
-        <div style={{ display:'flex', gap:'8px', marginBottom:'12px', alignItems:'center', flexWrap:'wrap', background:'rgba(255,255,255,0.03)', borderRadius:'8px', padding:'10px' }}>
-          <select value={group} onChange={e => setGroup(e.target.value)}
-            style={{ flex:1, minWidth:'160px', padding:'7px 10px', background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:'6px', color:'white', fontSize:'13px' }}>
-            <option value="">اختر باقة فحوصات...</option>
-            {Object.keys(TEST_GROUPS).map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
-          <input type="number" value={groupQty} onChange={e => setGroupQty(+e.target.value)} min="1"
-            style={{ width:'80px', padding:'7px 10px', background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:'6px', color:'white', fontSize:'13px', textAlign:'center' }} />
-          <button onClick={onApplyGroup}
-            style={{ padding:'7px 16px', background:'rgba(52,211,153,0.2)', color:'#34d399', border:'1px solid rgba(52,211,153,0.4)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700', whiteSpace:'nowrap' }}>
-            ✔ تطبيق الباقة
-          </button>
-          <button onClick={onApplyBlocked}
-            style={{ padding:'7px 16px', background:'rgba(239,68,68,0.2)', color:'#ef4444', border:'1px solid rgba(239,68,68,0.4)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700', whiteSpace:'nowrap' }}>
-            🚫 تفعيل كل المحجوبة
-          </button>
+        <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'12px', background:'rgba(255,255,255,0.03)', borderRadius:'8px', padding:'10px' }}>
+          <div style={{ display:'flex', gap:'8px' }}>
+            <select value={group} onChange={e => setGroup(e.target.value)}
+              style={{ flex:1, padding:'7px 10px', background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:'6px', color:'white', fontSize:'13px' }}>
+              <option value="">اختر باقة فحوصات...</option>
+              {Object.keys(TEST_GROUPS).map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <input type="number" value={groupQty} onChange={e => setGroupQty(+e.target.value)} min="1"
+              style={{ width:'80px', padding:'7px 10px', background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:'6px', color:'white', fontSize:'13px', textAlign:'center' }} />
+          </div>
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button onClick={onApplyGroup}
+              style={{ flex:1, padding:'7px 16px', background:'rgba(52,211,153,0.2)', color:'#34d399', border:'1px solid rgba(52,211,153,0.4)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700', whiteSpace:'nowrap' }}>
+              ✔ تطبيق الباقة
+            </button>
+            <button onClick={onApplyBlocked}
+              style={{ flex:1, padding:'7px 16px', background:'rgba(239,68,68,0.2)', color:'#ef4444', border:'1px solid rgba(239,68,68,0.4)', borderRadius:'6px', cursor:'pointer', fontSize:'13px', fontWeight:'700', whiteSpace:'nowrap' }}>
+              🚫 تفعيل كل المحجوبة
+            </button>
+          </div>
         </div>
 
         {/* All tests grid — ALL_TESTS first, then any extra blocked codes not in the standard list */}
