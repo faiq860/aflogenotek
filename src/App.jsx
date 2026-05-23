@@ -231,10 +231,13 @@ export default function App() {
     const init = {}
     ALL_TESTS.forEach(t => { init[t] = 0 })
 
-    // تحميل الفحوصات المحجوبة الحالية
-    setFiBlocked(new Set(
-      device.blocked_tests ? device.blocked_tests.split(',').map(s => s.trim()).filter(Boolean) : []
-    ))
+    // Add any blocked codes not already in ALL_TESTS so they appear in the modal
+    const currentBlocked = device.blocked_tests
+      ? device.blocked_tests.split(',').map(s => s.trim()).filter(Boolean)
+      : []
+    currentBlocked.forEach(t => { if (!(t in init)) init[t] = 0 })
+
+    setFiBlocked(new Set(currentBlocked))
 
     // ملء فوري من بيانات الجهاز المحملة مسبقاً (total_quota وليس remaining)
     if (device.test_quotas && device.test_quotas.length > 0) {
@@ -260,11 +263,17 @@ export default function App() {
             return updated
           })
         }
-        // Refresh blocked_tests from the live DB value (overrides the stale snapshot)
+        // Refresh blocked_tests from the live DB value and expose any extra codes in the grid
         if (typeof data.blocked_tests === 'string') {
-          setFiBlocked(new Set(
+          const freshBlocked = new Set(
             data.blocked_tests.split(',').map(s => s.trim()).filter(Boolean)
-          ))
+          )
+          setFiBlocked(freshBlocked)
+          setFiTests(prev => {
+            const updated = { ...prev }
+            freshBlocked.forEach(t => { if (!(t in updated)) updated[t] = 0 })
+            return updated
+          })
         }
       }
     } catch {}
@@ -904,9 +913,9 @@ function FirstInstallModal({ device, tests, setTests, blocked, setBlocked, group
           </button>
         </div>
 
-        {/* All tests grid */}
+        {/* All tests grid — ALL_TESTS first, then any extra blocked codes not in the standard list */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px', marginBottom:'14px' }}>
-          {ALL_TESTS.map(t => {
+          {[...ALL_TESTS, ...Object.keys(tests).filter(t => !ALL_TESTS.includes(t))].map(t => {
             const qty        = tests[t] || 0
             const isBlocked  = blocked.has(t)
             const active     = qty > 0
