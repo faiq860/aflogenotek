@@ -248,7 +248,7 @@ export default function App() {
     setFiGroupQty(100)
     setFirstInstallModal(true)
 
-    // تحديث من قاعدة البيانات
+    // تحديث من قاعدة البيانات (الحصص + blocked_tests الحديث)
     try {
       const res = await fetch(`/api/test_quotas?device_id=${encodeURIComponent(device.id)}`)
       if (res.ok) {
@@ -259,6 +259,12 @@ export default function App() {
             data.quotas.forEach(q => { updated[q.test_code] = Number(q.total_quota) || 0 })
             return updated
           })
+        }
+        // Refresh blocked_tests from the live DB value (overrides the stale snapshot)
+        if (typeof data.blocked_tests === 'string') {
+          setFiBlocked(new Set(
+            data.blocked_tests.split(',').map(s => s.trim()).filter(Boolean)
+          ))
         }
       }
     } catch {}

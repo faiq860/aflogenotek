@@ -135,24 +135,22 @@ export default async function handler(req, res) {
       });
     }
 
-    // 5. Update last_seen, active status and current telemetry hashes
-    // Protect database values from being overwritten with empty/null strings
+    // 5. Update last_seen, active status and current telemetry hashes.
+    // blocked_tests and blocked_pages are intentionally excluded here —
+    // they are the server's source of truth and can only be changed via
+    // the dashboard's update_blocking action in device_ops.js.
     await client.query(`
-      UPDATE machines 
-      SET status = $1, last_seen = NOW(), 
+      UPDATE machines
+      SET status = $1, last_seen = NOW(),
           machine_name = COALESCE(NULLIF($2, ''), machine_name),
           machine_hash = COALESCE(NULLIF($3, ''), machine_hash),
-          analyzer_serial = COALESCE(NULLIF($4, ''), analyzer_serial),
-          blocked_tests = COALESCE(NULLIF($5, ''), blocked_tests),
-          blocked_pages = COALESCE(NULLIF($6, ''), blocked_pages)
-      WHERE hardware_id = $7
+          analyzer_serial = COALESCE(NULLIF($4, ''), analyzer_serial)
+      WHERE hardware_id = $5
     `, [
-      Status || 'online', 
-      CustomerName || DeviceName, 
-      incomingMachineHash, 
-      incomingAnalyzerSerial, 
-      blocked_tests || '', 
-      blocked_pages || '', 
+      Status || 'online',
+      CustomerName || DeviceName,
+      incomingMachineHash,
+      incomingAnalyzerSerial,
       HardwareId
     ]);
 

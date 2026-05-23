@@ -97,7 +97,22 @@ export default async function handler(req, res) {
         ORDER BY q.test_code
       `, [deviceId]);
 
-      return res.status(200).json({ quotas: result.rows });
+      // Also return the device's current blocked_tests so the dashboard
+      // can initialise the First Install modal with up-to-date data.
+      let blockedTests = '';
+      let blockedPages = '';
+      try {
+        const machineRes = await client.query(
+          `SELECT blocked_tests, blocked_pages FROM machines WHERE hardware_id = $1`,
+          [deviceId]
+        );
+        if (machineRes.rows.length > 0) {
+          blockedTests = machineRes.rows[0].blocked_tests || '';
+          blockedPages = machineRes.rows[0].blocked_pages || '';
+        }
+      } catch (_) {}
+
+      return res.status(200).json({ quotas: result.rows, blocked_tests: blockedTests, blocked_pages: blockedPages });
 
     } else if (req.method === 'POST') {
       const { action, deviceId, testCode, testName, totalQuota, alertThreshold } = req.body;
